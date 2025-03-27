@@ -28,11 +28,19 @@ function getAnkiBasePath() {
 
 /**
  * Retorna la ruta a collection.media del perfil actual de Anki.
- *
- * Primero intenta usar profiles.ini; si no existe, utiliza la fecha de modificación
- * del archivo collection.anki2 para seleccionar el perfil más reciente (presumiblemente activo).
+ * Si se define la variable de entorno ANKI_MEDIA_PATH, se usará esa ruta.
  */
 function getAnkiMediaPath() {
+  // Si se ha definido una ruta personalizada mediante variable de entorno, úsala.
+  if (process.env.ANKI_MEDIA_PATH) {
+    const customPath = process.env.ANKI_MEDIA_PATH;
+    if (!fs.existsSync(customPath)) {
+      fs.mkdirSync(customPath, { recursive: true });
+      console.log(`Se creó la carpeta personalizada ANKI_MEDIA_PATH: ${customPath}`);
+    }
+    return customPath;
+  }
+  
   const ankiBasePath = getAnkiBasePath();
   if (!fs.existsSync(ankiBasePath)) {
     throw new Error(`No se encontró la carpeta Anki2 en: ${ankiBasePath}`);
@@ -83,13 +91,19 @@ function getAnkiMediaPath() {
   return path.join(ankiBasePath, selectedProfile.name, 'collection.media');
 }
 
+// Intentamos obtener la ruta de media. Si falla, usamos un folder de respaldo.
 let MEDIA_PATH;
 try {
   MEDIA_PATH = getAnkiMediaPath();
   console.log('Ruta detectada de collection.media:', MEDIA_PATH);
 } catch (error) {
   console.error('Error al detectar la ruta de collection.media:', error.message);
-  process.exit(1);
+  // Fallback: crear una carpeta 'media' en el directorio del proyecto
+  MEDIA_PATH = path.join(__dirname, 'media');
+  if (!fs.existsSync(MEDIA_PATH)) {
+    fs.mkdirSync(MEDIA_PATH, { recursive: true });
+    console.log('Se creó la carpeta fallback "media":', MEDIA_PATH);
+  }
 }
 
 const ANKI_CONNECT_URL = "http://localhost:8765";
