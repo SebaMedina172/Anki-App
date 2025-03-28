@@ -298,105 +298,105 @@ app.get('/search', async (req, res) => {
   }
 });
 
-async function noteExists(deck, model, normalizedWord, ankiConnectUrl) {
-  // Este ejemplo asume que el campo 'Word' es el que se verifica.
-  const query = `deck:"${deck}" note:"${model}" Word:"${normalizedWord}"`;
-  const payload = { action: 'findNotes', version: 6, params: { query } };
-  try {
-    const response = await axios.post(ankiConnectUrl, payload, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    // Si se encontraron notas, retorna true
-    return response.data.result && response.data.result.length > 0;
-  } catch (error) {
-    console.error("Error al buscar nota:", error.message);
-    return false;
-  }
-}
+// async function noteExists(deck, model, normalizedWord, ankiConnectUrl) {
+//   // Este ejemplo asume que el campo 'Word' es el que se verifica.
+//   const query = `deck:"${deck}" note:"${model}" Word:"${normalizedWord}"`;
+//   const payload = { action: 'findNotes', version: 6, params: { query } };
+//   try {
+//     const response = await axios.post(ankiConnectUrl, payload, {
+//       headers: { 'Content-Type': 'application/json' }
+//     });
+//     // Si se encontraron notas, retorna true
+//     return response.data.result && response.data.result.length > 0;
+//   } catch (error) {
+//     console.error("Error al buscar nota:", error.message);
+//     return false;
+//   }
+// }
 
-/**
- * Endpoint para crear la tarjeta en Anki.
- */
-app.post('/create-card', async (req, res) => {
-  try {
-    const { deck, model, ankiConnectUrl, word, ipa, meaning, example } = req.body;
-    if (!deck || !model || !ankiConnectUrl || !word || !ipa || !meaning || !example) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
+// /**
+//  * Endpoint para crear la tarjeta en Anki.
+//  */
+// app.post('/create-card', async (req, res) => {
+//   try {
+//     const { deck, model, ankiConnectUrl, word, ipa, meaning, example } = req.body;
+//     if (!deck || !model || !ankiConnectUrl || !word || !ipa || !meaning || !example) {
+//       return res.status(400).json({ error: 'Missing required fields' });
+//     }
 
-    const normalizedWord = word.trim().toLowerCase();
+//     const normalizedWord = word.trim().toLowerCase();
 
-    // Verificar si ya existe la nota
-    const exists = await noteExists(deck, model, normalizedWord, ankiConnectUrl);
-    if (exists) {
-      return res.status(400).json({ error: 'La palabra ya existe en el deck.' });
-    }
+//     // Verificar si ya existe la nota
+//     const exists = await noteExists(deck, model, normalizedWord, ankiConnectUrl);
+//     if (exists) {
+//       return res.status(400).json({ error: 'La palabra ya existe en el deck.' });
+//     }
 
-    const audioWordFilename = `${normalizedWord}_pronunciation.mp3`;
-    const audioMeaningFilename = `${normalizedWord}_definition.mp3`;
-    const audioExampleFilename = `${normalizedWord}_example.mp3`;
+//     const audioWordFilename = `${normalizedWord}_pronunciation.mp3`;
+//     const audioMeaningFilename = `${normalizedWord}_definition.mp3`;
+//     const audioExampleFilename = `${normalizedWord}_example.mp3`;
 
-    await createAudio(word, audioWordFilename);
-    await createAudio(meaning, audioMeaningFilename);
-    await createAudio(example, audioExampleFilename);
+//     await createAudio(word, audioWordFilename);
+//     await createAudio(meaning, audioMeaningFilename);
+//     await createAudio(example, audioExampleFilename);
 
-    const fields = {
-      Word: normalizedWord,
-      Sound: `[sound:${audioWordFilename}]`,
-      IPA: ipa.trim(),
-      Meaning: meaning.trim(),
-      Example: example.trim(),
-      Sound_Meaning: `[sound:${audioMeaningFilename}]`,
-      Sound_Example: `[sound:${audioExampleFilename}]`
-    };
+//     const fields = {
+//       Word: normalizedWord,
+//       Sound: `[sound:${audioWordFilename}]`,
+//       IPA: ipa.trim(),
+//       Meaning: meaning.trim(),
+//       Example: example.trim(),
+//       Sound_Meaning: `[sound:${audioMeaningFilename}]`,
+//       Sound_Example: `[sound:${audioExampleFilename}]`
+//     };
 
-    const result = await addCardToAnki(deck, model, fields, ankiConnectUrl);
-    res.json(result);
-  } catch (error) {
-    console.error('Error en /create-card:', error.message);
-    res.status(500).json({ error: error.toString() });
-  }
-});
+//     const result = await addCardToAnki(deck, model, fields, ankiConnectUrl);
+//     res.json(result);
+//   } catch (error) {
+//     console.error('Error en /create-card:', error.message);
+//     res.status(500).json({ error: error.toString() });
+//   }
+// });
 
-// Endpoint para obtener los decks desde AnkiConnect
-app.post('/anki/decks', async (req, res) => {
-  const { ankiConnectUrl } = req.body;
-  if (!ankiConnectUrl) {
-    return res.status(400).json({ error: 'Falta ankiConnectUrl' });
-  }
-  try {
-    const deckResponse = await axios.post(ankiConnectUrl, {
-      action: 'deckNames',
-      version: 6,
-    }, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    res.json(deckResponse.data);
-  } catch (error) {
-    console.error('Error al obtener decks:', error.message);
-    res.status(500).json({ error: error.toString() });
-  }
-});
+// // Endpoint para obtener los decks desde AnkiConnect
+// app.post('/anki/decks', async (req, res) => {
+//   const { ankiConnectUrl } = req.body;
+//   if (!ankiConnectUrl) {
+//     return res.status(400).json({ error: 'Falta ankiConnectUrl' });
+//   }
+//   try {
+//     const deckResponse = await axios.post(ankiConnectUrl, {
+//       action: 'deckNames',
+//       version: 6,
+//     }, {
+//       headers: { 'Content-Type': 'application/json' }
+//     });
+//     res.json(deckResponse.data);
+//   } catch (error) {
+//     console.error('Error al obtener decks:', error.message);
+//     res.status(500).json({ error: error.toString() });
+//   }
+// });
 
-// Endpoint para obtener los modelos desde AnkiConnect
-app.post('/anki/models', async (req, res) => {
-  const { ankiConnectUrl } = req.body;
-  if (!ankiConnectUrl) {
-    return res.status(400).json({ error: 'Falta ankiConnectUrl' });
-  }
-  try {
-    const modelResponse = await axios.post(ankiConnectUrl, {
-      action: 'modelNames',
-      version: 6,
-    }, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    res.json(modelResponse.data);
-  } catch (error) {
-    console.error('Error al obtener modelos:', error.message);
-    res.status(500).json({ error: error.toString() });
-  }
-});
+// // Endpoint para obtener los modelos desde AnkiConnect
+// app.post('/anki/models', async (req, res) => {
+//   const { ankiConnectUrl } = req.body;
+//   if (!ankiConnectUrl) {
+//     return res.status(400).json({ error: 'Falta ankiConnectUrl' });
+//   }
+//   try {
+//     const modelResponse = await axios.post(ankiConnectUrl, {
+//       action: 'modelNames',
+//       version: 6,
+//     }, {
+//       headers: { 'Content-Type': 'application/json' }
+//     });
+//     res.json(modelResponse.data);
+//   } catch (error) {
+//     console.error('Error al obtener modelos:', error.message);
+//     res.status(500).json({ error: error.toString() });
+//   }
+// });
 
 console.log('Attempting to listen on the port...');
 const PORT = process.env.PORT || 3001;;

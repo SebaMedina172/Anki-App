@@ -25,7 +25,6 @@ import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { GlobalStyles } from '@mui/material';
 
-
 <GlobalStyles styles={{
   body: {
     transition: 'background-color 0.3s ease, color 0.3s ease',
@@ -50,8 +49,6 @@ function App() {
   const [selectedLanguage, setSelectedLanguage] = useState(localStorage.getItem('selectedLanguage') || 'en');
   const [ankiConnectError, setAnkiConnectError] = useState<string | null>(null);
 
-
-
   // Nuevos estados para decks y modelos disponibles
   const [availableDecks, setAvailableDecks] = useState<string[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -71,30 +68,27 @@ function App() {
     palette: {
       mode: darkMode ? 'dark' : 'light',
       background: {
-        // En modo claro, usamos un fondo más cálido o grisáceo en lugar de un blanco puro
         default: darkMode ? '#212121' : '#f7f7f7',
         paper: darkMode ? '#424242' : '#dbdbdb',
       },
-      // Puedes también ajustar otros colores primarios si lo deseas
       primary: {
         main: '#1976d2',
       },
     },
   });
 
-
-  // Función para obtener decks y modelos desde Anki Connect
+  // Función para obtener decks y modelos desde AnkiConnect directamente
   const fetchDecksAndModels = async (url: string) => {
     setIsFetchingOptions(true);
     try {
       // Reiniciamos el error en cada intento
       setAnkiConnectError(null);
   
-      // Obtener decks
-      const deckResponse = await fetch(`${import.meta.env.VITE_API_URL}/anki/decks`, {
+      // Obtener decks desde AnkiConnect
+      const deckResponse = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ankiConnectUrl: url }),
+        body: JSON.stringify({ action: 'deckNames', version: 6 }),
       });
       const deckData = await deckResponse.json();
       if (deckData.error) {
@@ -102,11 +96,11 @@ function App() {
       }
       const decks = deckData.result;
   
-      // Obtener modelos
-      const modelResponse = await fetch(`${import.meta.env.VITE_API_URL}/anki/models`, {
+      // Obtener modelos desde AnkiConnect
+      const modelResponse = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ankiConnectUrl: url }),
+        body: JSON.stringify({ action: 'modelNames', version: 6 }),
       });
       const modelData = await modelResponse.json();
       if (modelData.error) {
@@ -116,23 +110,17 @@ function App() {
   
       setAvailableDecks(decks);
       setAvailableModels(models);
-      // Si todo sale bien, marcamos que la conexión es válida
       setAnkiConnectError(null);
     } catch (error) {
       console.error('Error al obtener decks/modelos:', error);
-      // Convertir el error a string para analizarlo
       const errMsg = error instanceof Error ? error.message : String(error);
-      
-      // Analizamos el mensaje para dar un feedback específico
       if (errMsg.includes('ECONNREFUSED')) {
         setAnkiConnectError('Anki no está abierto. Por favor, abre la aplicación Anki.');
       } else {
         setAnkiConnectError('URL incorrecta o Anki Connect no responde.');
       }
-      // Limpiamos opciones para que los campos queden deshabilitados
       setAvailableDecks([]);
       setAvailableModels([]);
-      // Mostramos un Snackbar informativo
       setSnackbar({ open: true, message: `Error: ${ankiConnectError || errMsg}`, severity: 'error' });
     } finally {
       setIsFetchingOptions(false);
@@ -152,6 +140,7 @@ function App() {
   };
 
   // Función para buscar la palabra en el backend (GET /search)
+  // Se mantiene igual ya que sigue llamando al backend para búsqueda en el diccionario
   const handleSearch = async () => {
     if (!searchWord.trim()) {
       setSearchError(true);
@@ -197,23 +186,31 @@ function App() {
     }
   };
 
-  // Función para aprobar la tarjeta y enviarla al backend (POST /create-card)
+  // Función para aprobar la tarjeta y enviarla directamente a AnkiConnect
   const handleApprove = async (label: Label) => {
     setIsProcessing(true);
     setProcessingLabelId(label.id);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/create-card`, {
+      // Construimos la nota (sin audio por el momento)
+      const note = {
+        deckName: deck,
+        modelName: model,
+        fields: {
+          Word: label.text.toLowerCase(),
+          IPA: label.ipa.trim(),
+          Meaning: label.meaning.trim(),
+          Example: label.example.trim(),
+        },
+        options: {
+          allowDuplicate: false,
+        },
+      };
+      const payload = { action: 'addNote', version: 6, params: { note } };
+  
+      const response = await fetch(ankiConnectUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deck,
-          model,
-          ankiConnectUrl,
-          word: label.text,
-          ipa: label.ipa,
-          meaning: label.meaning,
-          example: label.example,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await response.json();
       if (data.error) {
@@ -266,338 +263,335 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-        <Box
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          width: '100%',
+          minHeight: 451,
+          transition: 'all 0.5s ease-in-out',
+          flexDirection: {
+            xs: 'column',
+            sm: 'row',
+          },
+          padding: {
+            xs: 2,
+            sm: 3,
+          },
+        }}
+      >
+        <Container
+          maxWidth="md"
           sx={{
             display: 'flex',
+            flexDirection: 'column',
             justifyContent: 'center',
-            width: '100%',
-            minHeight: 451,
-            transition: 'all 0.5s ease-in-out',
-            flexDirection: {
-              xs: 'column', // Móviles
-              sm: 'row', // Tabletas
-            },
+            alignItems: 'stretch',
             padding: {
               xs: 2,
               sm: 3,
             },
+            boxSizing: 'border-box',
+            margin: '0 auto',
+            width: "100%"
           }}
         >
-          <Container
-            maxWidth="md"
+          {/* Botón para alternar modo oscuro */}
+          <IconButton
+            onClick={() => setDarkMode(!darkMode)}
             sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'stretch',
-              padding: {
-                xs: 2, // Menor padding en móviles
-                sm: 3, // Más padding en tabletas
-              },
-              boxSizing: 'border-box',
-              margin: '0 auto',
-              width: "100%"
+              position: 'fixed',
+              bottom: 16,
+              right: 16,
+              zIndex: 1300,
+              width: (theme) => theme.spacing(8),
+              height: (theme) => theme.spacing(8),
             }}
           >
-            
-            {/* Botón para alternar modo oscuro */}
-            <IconButton
-              onClick={() => setDarkMode(!darkMode)}
+            {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
+          </IconButton>
+
+          <Typography variant="h2" gutterBottom>
+            Anki Card Generator
+          </Typography>
+
+          {/* Sección de configuración */}
+          <Box sx={{ mb: 4, width:"100%" }}>
+            <Typography variant="h5" gutterBottom>
+              Configuración
+            </Typography>
+            <Box
               sx={{
-                position: 'fixed',
-                bottom: 16,
-                right: 16,
-                zIndex: 1300, // Asegura que esté por encima de otros elementos
-                width: (theme) => theme.spacing(8),   // 8 * 8px = 64px (puedes ajustar)
-                height: (theme) => theme.spacing(8),
+                display: 'grid',
+                gap: 2,
+                gridTemplateColumns: {
+                  xs: '1fr',
+                  sm: '1fr 1fr',
+                  md: 'repeat(3, 1fr)',
+                },
               }}
             >
-              {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
-            </IconButton>
-
-
-            <Typography variant="h2" gutterBottom>
-              Anki Card Generator
-            </Typography>
-
-            {/* Sección de configuración */}
-            <Box sx={{ mb: 4, width:"100%" }}>
-              <Typography variant="h5" gutterBottom>
-                Configuración
-              </Typography>
+              {/* Campo Deck */}
+              <Box>
+                <Autocomplete
+                  options={availableDecks}
+                  value={deck}
+                  onChange={(_, newValue) => {
+                    if (newValue) setDeck(newValue);
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Deck"
+                      variant="standard"
+                      helperText={
+                        (!ankiConnectUrl || ankiConnectError)
+                          ? ankiConnectError || 'Configura la URL de Anki Connect primero'
+                          : ''
+                      }
+                    />
+                  )}
+                  disabled={!ankiConnectUrl || isFetchingOptions || Boolean(ankiConnectError)}
+                  fullWidth
+                />
+              </Box>
+              {/* Campo Model */}
+              <Box>
+                <Autocomplete
+                  options={availableModels}
+                  value={model}
+                  onChange={(_, newValue) => {
+                    if (newValue) setModel(newValue);
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Model"
+                      variant="standard"
+                      helperText={
+                        (!ankiConnectUrl || ankiConnectError)
+                          ? ankiConnectError || 'Configura la URL de Anki Connect primero'
+                          : ''
+                      }
+                    />
+                  )}
+                  disabled={!ankiConnectUrl || isFetchingOptions || Boolean(ankiConnectError)}
+                  fullWidth
+                />
+              </Box>
+              {/* Campo Idioma */}
+              <Box>
+                <FormControl fullWidth variant="standard">
+                  <InputLabel id="language-select-label">Idioma</InputLabel>
+                  <Select
+                    labelId="language-select-label"
+                    id="language-select"
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    label="Idioma"
+                  >
+                    <MenuItem value="en">Inglés</MenuItem>
+                    <MenuItem value="es">Español</MenuItem>
+                    <MenuItem value="de">Alemán</MenuItem>
+                    <MenuItem value="ja">Japonés</MenuItem>
+                    <MenuItem value="zh">Chino</MenuItem>
+                    {/* Agrega más idiomas si lo deseas */}
+                  </Select>
+                </FormControl>
+              </Box>
+              {/* Segunda fila: Campo Anki Connect URL */}
+              <Box sx={{ gridColumn: { xs: '1fr', sm: 'span 2', md: 'span 2' } }}>
+                <TextField
+                  label="Anki Connect URL"
+                  variant="standard"
+                  value={ankiConnectUrl}
+                  onChange={(e) => setAnkiConnectUrl(e.target.value)}
+                  fullWidth
+                />
+              </Box>
+              {/* Segunda fila: Botón Save Settings */}
               <Box
                 sx={{
-                  display: 'grid',
-                  gap: 2,
-                  // Para móviles: 1 columna, para tablet: 2 columnas, para pantallas grandes: 3 columnas
-                  gridTemplateColumns: {
-                    xs: '1fr',
-                    sm: '1fr 1fr',
-                    md: 'repeat(3, 1fr)',
-                  },
+                  gridColumn: { xs: '1fr', sm: 'span 2', md: 'span 1' },
+                  display: 'flex',
+                  alignItems: 'center',
                 }}
               >
-                {/* Campo Deck */}
-                <Box>
-                  <Autocomplete
-                    options={availableDecks}
-                    value={deck}
-                    onChange={(_, newValue) => {
-                      if (newValue) setDeck(newValue);
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Deck"
-                        variant="standard"
-                        helperText={
-                          (!ankiConnectUrl || ankiConnectError)
-                            ? ankiConnectError || 'Configura la URL de Anki Connect primero'
-                            : ''
-                        }
-                      />
-                    )}
-                    disabled={!ankiConnectUrl || isFetchingOptions || Boolean(ankiConnectError)}
-                    fullWidth
-                  />
-                </Box>
-                {/* Campo Model */}
-                <Box>
-                  <Autocomplete
-                    options={availableModels}
-                    value={model}
-                    onChange={(_, newValue) => {
-                      if (newValue) setModel(newValue);
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Model"
-                        variant="standard"
-                        helperText={
-                          (!ankiConnectUrl || ankiConnectError)
-                            ? ankiConnectError || 'Configura la URL de Anki Connect primero'
-                            : ''
-                        }
-                      />
-                    )}
-                    disabled={!ankiConnectUrl || isFetchingOptions || Boolean(ankiConnectError)}
-                    fullWidth
-                  />
-                </Box>
-                {/* Campo Idioma */}
-                <Box>
-                  <FormControl fullWidth variant="standard">
-                    <InputLabel id="language-select-label">Idioma</InputLabel>
-                    <Select
-                      labelId="language-select-label"
-                      id="language-select"
-                      value={selectedLanguage}
-                      onChange={(e) => setSelectedLanguage(e.target.value)}
-                      label="Idioma"
-                    >
-                      <MenuItem value="en">Inglés</MenuItem>
-                      <MenuItem value="es">Español</MenuItem>
-                      <MenuItem value="de">Alemán</MenuItem>
-                      <MenuItem value="ja">Japonés</MenuItem>
-                      <MenuItem value="zh">Chino</MenuItem>
-                      {/* Agrega más idiomas si lo deseas */}
-                    </Select>
-                  </FormControl>
-                </Box>
-                {/* Segunda fila: Campo Anki Connect URL */}
-                <Box sx={{ gridColumn: { xs: '1fr', sm: 'span 2', md: 'span 2' } }}>
-                  <TextField
-                    label="Anki Connect URL"
-                    variant="standard"
-                    value={ankiConnectUrl}
-                    onChange={(e) => setAnkiConnectUrl(e.target.value)}
-                    fullWidth
-                  />
-                </Box>
-                {/* Segunda fila: Botón Save Settings */}
-                <Box
+                <Button
+                  variant="contained"
+                  fullWidth
+                  startIcon={<SettingsIcon />}
+                  onClick={handleSaveSettings}
                   sx={{
-                    gridColumn: { xs: '1fr', sm: 'span 2', md: 'span 1' },
-                    display: 'flex',
-                    alignItems: 'center',
+                    height: '100%',
+                    paddingY: 1.5,
+                    paddingX: 2,
                   }}
+                >
+                  {isFetchingOptions ? <CircularProgress size={20} /> : 'Save Settings'}
+                </Button>
+              </Box>
+            </Box>  
+          </Box>
+
+          {/* Sección de búsqueda */}
+          <Box sx={{ mb: 4 }}>
+            <Typography variant="h5" gutterBottom>
+              Buscar Palabra
+            </Typography>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <TextField
+                label="Palabra"
+                variant="standard"
+                value={searchWord}
+                onChange={handleSearchChange}
+                error={searchError}
+                helperText={searchError ? 'Debe introducir una palabra' : ''}
+                fullWidth
+              />
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<SearchIcon />}
+                onClick={handleSearch}
+                sx={{
+                  height: '100%',
+                  minWidth: {
+                    xs: '120px',
+                    sm: '150px',
+                    md: 'auto',
+                  },
+                  paddingX: 2,
+                }}
+              >
+                Search
+              </Button>
+            </Stack>
+          </Box>
+
+          {/* Sección de Labels */}
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="h5" gutterBottom>
+              Queue de Labels
+            </Typography>
+
+            {loadingMessage && (
+              <Typography variant="body2" sx={{ color: 'gray', mb: 2 }}>
+                {loadingMessage}
+              </Typography>
+            )}
+
+            {labels.map((label) => (
+             <Box
+                key={label.id}
+                sx={{
+                  mt: 2,
+                  backgroundColor: (theme) =>
+                    theme.palette.mode === 'dark' ? '#424242' : '#f0f0f0',
+                  color: (theme) => (theme.palette.mode === 'dark' ? '#fff' : '#333'),
+                  padding: { xs: 1, sm: 2 },
+                  borderRadius: 4,
+                  boxShadow: '-3px 5px 12px rgba(0, 0, 0, 0.5)',
+                  width: { xs: '100%', sm: '95%' },
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'normal',
+                  transition: 'all 0.3s ease-in-out',
+                }}
+              >
+                <Typography variant="h6"><b>Word:</b> {label.text}</Typography>
+
+                {label.isEditing ? (
+                  <Stack spacing={2} sx={{ mt: 1, flexWrap: 'wrap' }}>
+                    <TextField
+                      label="IPA"
+                      variant="outlined"
+                      value={label.ipa}
+                      onChange={(e) => updateLabelField(label.id, 'ipa', e.target.value)}
+                      fullWidth
+                    />
+                    <TextField
+                      label="Meaning"
+                      variant="outlined"
+                      value={label.meaning}
+                      onChange={(e) => updateLabelField(label.id, 'meaning', e.target.value)}
+                      fullWidth
+                    />
+                    <TextField
+                      label="Example"
+                      variant="outlined"
+                      value={label.example}
+                      onChange={(e) => updateLabelField(label.id, 'example', e.target.value)}
+                      fullWidth
+                    />
+                  </Stack>
+                ) : (
+                  <>
+                    <Typography><b>IPA:</b> {label.ipa}</Typography>
+                    <Typography><b>Meaning:</b> {label.meaning}</Typography>
+                    <Typography><b>Example:</b> {label.example}</Typography>
+                  </>
+                )}
+
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={2}
+                  sx={{ mt: 2, flexWrap: 'wrap' }}
                 >
                   <Button
                     variant="contained"
-                    fullWidth
-                    startIcon={<SettingsIcon />}
-                    onClick={handleSaveSettings}
+                    color="success"
+                    disabled={isProcessing || label.isEditing}
                     sx={{
-                      height: '100%',
-                      paddingY: 1.5,
-                      paddingX: 2,
+                      transition: 'all 0.3s ease-in-out',
+                      color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
                     }}
+                    onClick={() => handleApprove(label)}
                   >
-                    {isFetchingOptions ? <CircularProgress size={20} /> : 'Save Settings'}
+                    {processingLabelId === label.id ? 'Procesando...' : 'Aprobar'}
                   </Button>
-                </Box>
-              </Box>  
-            </Box>
-
-            {/* Sección de búsqueda */}
-            <Box sx={{ mb: 4 }}>
-              <Typography variant="h5" gutterBottom>
-                Buscar Palabra
-              </Typography>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <TextField
-                  label="Palabra"
-                  variant="standard"
-                  value={searchWord}
-                  onChange={handleSearchChange}
-                  error={searchError}
-                  helperText={searchError ? 'Debe introducir una palabra' : ''}
-                  fullWidth
-                />
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<SearchIcon />}
-                  onClick={handleSearch}
-                  sx={{
-                    height: '100%',
-                    minWidth: {
-                      xs: '120px', // En móviles, un mínimo de 120px
-                      sm: '150px', // En tabletas, 150px
-                      md: 'auto',  // En pantallas mayores, que se ajuste
-                    },
-                    paddingX: 2, // Un poco de padding horizontal
-                  }}
-                >
-                  Search
-                </Button>
-              </Stack>
-            </Box>
-
-            {/* Sección de Labels */}
-            <Box sx={{ flexGrow: 1}}>
-              <Typography variant="h5" gutterBottom>
-                Queue de Labels
-              </Typography>
-
-              {loadingMessage && (
-                <Typography variant="body2" sx={{ color: 'gray', mb: 2 }}>
-                  {loadingMessage}
-                </Typography>
-              )}
-
-              {labels.map((label) => (
-               <Box
-                  key={label.id}
-                  sx={{
-                    mt: 2,
-                    backgroundColor: (theme) =>
-                      theme.palette.mode === 'dark' ? '#424242' : '#f0f0f0',
-                    color: (theme) => (theme.palette.mode === 'dark' ? '#fff' : '#333'),
-                    padding: { xs: 1, sm: 2 }, // menor padding en móviles
-                    borderRadius: 4,
-                    boxShadow: '-3px 5px 12px rgba(0, 0, 0, 0.5)',
-                    width: { xs: '100%', sm: '95%' }, // usa 100% en móviles
-                    overflowWrap: 'break-word',
-                    whiteSpace: 'normal',
-                    transition: 'all 0.3s ease-in-out',
-                  }}
-                >
-                  <Typography variant="h6"><b>Word:</b> {label.text}</Typography>
-
-                  {label.isEditing ? (
-                    <Stack spacing={2} sx={{ mt: 1, flexWrap: 'wrap' }}>
-                      <TextField
-                        label="IPA"
-                        variant="outlined"
-                        value={label.ipa}
-                        onChange={(e) => updateLabelField(label.id, 'ipa', e.target.value)}
-                        fullWidth
-                      />
-                      <TextField
-                        label="Meaning"
-                        variant="outlined"
-                        value={label.meaning}
-                        onChange={(e) => updateLabelField(label.id, 'meaning', e.target.value)}
-                        fullWidth
-                      />
-                      <TextField
-                        label="Example"
-                        variant="outlined"
-                        value={label.example}
-                        onChange={(e) => updateLabelField(label.id, 'example', e.target.value)}
-                        fullWidth
-                      />
-                    </Stack>
-                  ) : (
-                    <>
-                      <Typography><b>IPA:</b> {label.ipa}</Typography>
-                      <Typography><b>Meaning:</b> {label.meaning}</Typography>
-                      <Typography><b>Example:</b> {label.example}</Typography>
-                    </>
-                  )}
-
-                  <Stack
-                    direction={{ xs: 'column', sm: 'row' }} // En xs (móviles) se apilan en columna
-                    spacing={2}
-                    sx={{ mt: 2, flexWrap: 'wrap' }}
+                  <Button
+                    variant="contained"
+                    color="error"
+                    sx={{
+                      transition: 'all 0.3s ease-in-out',
+                      color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
+                    }}
+                    disabled={label.isEditing}
+                    onClick={() => setLabels((prev) => prev.filter((l) => l.id !== label.id))}
                   >
-                    <Button
-                      variant="contained"
-                      color="success"
-                      disabled={isProcessing || label.isEditing}
-                      sx={{
-                        transition: 'all 0.3s ease-in-out',
-                        color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
-                      }}
-                      onClick={() => handleApprove(label)}
-                    >
-                      {processingLabelId === label.id ? 'Procesando...' : 'Aprobar'}
-                    </Button>
-                    <Button
-                        variant="contained"
-                        color="error"
-                        sx={{
-                          transition: 'all 0.3s ease-in-out',
-                          color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
-                        }}
-                        disabled={label.isEditing}
-                        onClick={() => setLabels((prev) => prev.filter((l) => l.id !== label.id))}
-                      >
-                      Rechazar
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color={label.isEditing ? 'primary' : 'warning'}
-                      sx={{
-                        transition: 'all 0.3s ease-in-out',
-                        color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
-                      }}
-                      onClick={() => toggleEditLabel(label.id)}
-                    >
-                      {label.isEditing ? 'Hecho' : 'Editar'}
-                    </Button>
-                  </Stack>
-                </Box>
-              ))}
-            </Box>
-          </Container>
+                    Rechazar
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color={label.isEditing ? 'primary' : 'warning'}
+                    sx={{
+                      transition: 'all 0.3s ease-in-out',
+                      color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
+                    }}
+                    onClick={() => toggleEditLabel(label.id)}
+                  >
+                    {label.isEditing ? 'Hecho' : 'Editar'}
+                  </Button>
+                </Stack>
+              </Box>
+            ))}
+          </Box>
+        </Container>
 
-          <Snackbar
-            open={snackbar.open}
-            autoHideDuration={6000}
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={6000}
+          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+        >
+          <Alert
             onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+            severity={snackbar.severity as 'success' | 'error'}
+            sx={{ width: '100%' }}
           >
-            <Alert
-              onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-              severity={snackbar.severity as 'success' | 'error'}
-              sx={{ width: '100%' }}
-            >
-              {snackbar.message}
-            </Alert>
-          </Snackbar>
-        </Box>
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
+      </Box>
     </ThemeProvider>
   );
 }
