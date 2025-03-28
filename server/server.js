@@ -1,3 +1,4 @@
+console.log('Starting the server setup...');
 const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
@@ -10,7 +11,10 @@ const ini = require('ini');
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: '*'
+}));
+app.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
 // Determina la ruta base de Anki según el sistema operativo
 function getAnkiBasePath() {
@@ -268,6 +272,7 @@ async function getExampleMultiSource(apiExample, word) {
 /**
  * Endpoint para buscar datos de una palabra y obtener IPA, definición y ejemplo multi-fuente.
  */
+console.log('Defining routes...');
 app.get('/search', async (req, res) => {
   const word = req.query.word;
   if (!word) {
@@ -293,6 +298,22 @@ app.get('/search', async (req, res) => {
   }
 });
 
+async function noteExists(deck, model, normalizedWord, ankiConnectUrl) {
+  // Este ejemplo asume que el campo 'Word' es el que se verifica.
+  const query = `deck:"${deck}" note:"${model}" Word:"${normalizedWord}"`;
+  const payload = { action: 'findNotes', version: 6, params: { query } };
+  try {
+    const response = await axios.post(ankiConnectUrl, payload, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    // Si se encontraron notas, retorna true
+    return response.data.result && response.data.result.length > 0;
+  } catch (error) {
+    console.error("Error al buscar nota:", error.message);
+    return false;
+  }
+}
+
 /**
  * Endpoint para crear la tarjeta en Anki.
  */
@@ -303,20 +324,28 @@ app.post('/create-card', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const audioWordFilename = `${word}_pronunciation.mp3`;
-    const audioMeaningFilename = `${word}_definition.mp3`;
-    const audioExampleFilename = `${word}_example.mp3`;
+    const normalizedWord = word.trim().toLowerCase();
+
+    // Verificar si ya existe la nota
+    const exists = await noteExists(deck, model, normalizedWord, ankiConnectUrl);
+    if (exists) {
+      return res.status(400).json({ error: 'La palabra ya existe en el deck.' });
+    }
+
+    const audioWordFilename = `${normalizedWord}_pronunciation.mp3`;
+    const audioMeaningFilename = `${normalizedWord}_definition.mp3`;
+    const audioExampleFilename = `${normalizedWord}_example.mp3`;
 
     await createAudio(word, audioWordFilename);
     await createAudio(meaning, audioMeaningFilename);
     await createAudio(example, audioExampleFilename);
 
     const fields = {
-      Word: word,
+      Word: normalizedWord,
       Sound: `[sound:${audioWordFilename}]`,
-      IPA: ipa,
-      Meaning: meaning,
-      Example: example,
+      IPA: ipa.trim(),
+      Meaning: meaning.trim(),
+      Example: example.trim(),
       Sound_Meaning: `[sound:${audioMeaningFilename}]`,
       Sound_Example: `[sound:${audioExampleFilename}]`
     };
@@ -369,7 +398,8 @@ app.post('/anki/models', async (req, res) => {
   }
 });
 
-const PORT = 3001;
+console.log('Attempting to listen on the port...');
+const PORT = process.env.PORT || 3001;;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

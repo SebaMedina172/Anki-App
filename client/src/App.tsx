@@ -91,7 +91,7 @@ function App() {
       setAnkiConnectError(null);
   
       // Obtener decks
-      const deckResponse = await fetch('http://localhost:3001/anki/decks', {
+      const deckResponse = await fetch(`${import.meta.env.VITE_API_URL}/anki/decks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ankiConnectUrl: url }),
@@ -103,7 +103,7 @@ function App() {
       const decks = deckData.result;
   
       // Obtener modelos
-      const modelResponse = await fetch('http://localhost:3001/anki/models', {
+      const modelResponse = await fetch(`${import.meta.env.VITE_API_URL}/anki/models`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ankiConnectUrl: url }),
@@ -160,7 +160,7 @@ function App() {
     setSearchError(false);
     setLoadingMessage('Buscando textos...');
     try {
-      const response = await fetch(`http://localhost:3001/search?word=${encodeURIComponent(searchWord)}`);
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/search?word=${encodeURIComponent(searchWord)}`);
       const data = await response.json();
       if (data.error) {
         setLoadingMessage('');
@@ -202,7 +202,7 @@ function App() {
     setIsProcessing(true);
     setProcessingLabelId(label.id);
     try {
-      const response = await fetch('http://localhost:3001/create-card', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/create-card`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
