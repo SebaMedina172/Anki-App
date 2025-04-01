@@ -77,6 +77,11 @@ function App() {
     },
   });
 
+  const getTTSUrl = (text: string, lang: string = 'en') => {
+    return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
+  };
+  
+
   // Función para obtener decks y modelos desde AnkiConnect directamente
   const fetchDecksAndModels = async (url: string) => {
     setIsFetchingOptions(true);
@@ -186,47 +191,68 @@ function App() {
     }
   };
 
-  // Función para aprobar la tarjeta y enviarla directamente a AnkiConnect
-  const handleApprove = async (label: Label) => {
-    setIsProcessing(true);
-    setProcessingLabelId(label.id);
-    try {
-      // Construimos la nota (sin audio por el momento)
-      const note = {
-        deckName: deck,
-        modelName: model,
-        fields: {
-          Word: label.text.toLowerCase(),
-          IPA: label.ipa.trim(),
-          Meaning: label.meaning.trim(),
-          Example: label.example.trim(),
+  // Función para aprobar la tarjeta y enviarla directamente a AnkiConnect (con audio)
+const handleApprove = async (label: Label) => {
+  setIsProcessing(true);
+  setProcessingLabelId(label.id);
+  try {
+    // Construimos la nota incluyendo audio para cada campo.
+    // Asumimos que el modelo de nota tiene campos: Word, IPA, Meaning, Example,
+    // y que se usarán los campos Sound, Sound_Meaning y Sound_Example para reproducir el audio.
+    const note = {
+      deckName: deck,
+      modelName: model,
+      fields: {
+        Word: label.text.toLowerCase(),
+        IPA: label.ipa.trim(),
+        Meaning: label.meaning.trim(),
+        Example: label.example.trim(),
+      },
+      // Incluimos audio: se le indicará a AnkiConnect que descargue los archivos desde estas URLs.
+      audio: [
+        {
+          url: getTTSUrl(label.text, selectedLanguage),
+          filename: `${label.text.toLowerCase()}_word.mp3`,
+          fields: ["Sound"] // Este campo se añadirá automáticamente a tu nota
         },
-        options: {
-          allowDuplicate: false,
+        {
+          url: getTTSUrl(label.meaning, selectedLanguage),
+          filename: `${label.text.toLowerCase()}_meaning.mp3`,
+          fields: ["Sound_Meaning"]
         },
-      };
-      const payload = { action: 'addNote', version: 6, params: { note } };
-  
-      const response = await fetch(ankiConnectUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      setSnackbar({ open: true, message: 'Tarjeta creada con éxito', severity: 'success' });
-      setLabels((prev) => prev.filter((l) => l.id !== label.id));
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      console.error('Error al aprobar la tarjeta:', errMsg);
-      setSnackbar({ open: true, message: `Error al crear la tarjeta: ${errMsg}`, severity: 'error' });
-    } finally {
-      setIsProcessing(false);
-      setProcessingLabelId(null);
+        {
+          url: getTTSUrl(label.example, selectedLanguage),
+          filename: `${label.text.toLowerCase()}_example.mp3`,
+          fields: ["Sound_Example"]
+        }
+      ],
+      options: {
+        allowDuplicate: false,
+      },
+    };
+
+    const payload = { action: 'addNote', version: 6, params: { note } };
+
+    const response = await fetch(ankiConnectUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(data.error);
     }
-  };
+    setSnackbar({ open: true, message: 'Tarjeta creada con éxito', severity: 'success' });
+    setLabels((prev) => prev.filter((l) => l.id !== label.id));
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error('Error al aprobar la tarjeta:', errMsg);
+    setSnackbar({ open: true, message: `Error al crear la tarjeta: ${errMsg}`, severity: 'error' });
+  } finally {
+    setIsProcessing(false);
+    setProcessingLabelId(null);
+  }
+};
 
   // Guarda la configuración en localStorage y recupera decks/modelos si la URL es válida
   const handleSaveSettings = () => {
