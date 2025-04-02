@@ -39,6 +39,8 @@ interface Label {
   meaning: string;
   example: string;
   isEditing: boolean;
+  imageSuggestions?: string[];  // URLs sugeridas para esta etiqueta
+  selectedImage?: string | null; // URL de la imagen elegida para esta etiqueta
 }
 
 function App() {
@@ -63,9 +65,11 @@ function App() {
   const [processingLabelId, setProcessingLabelId] = useState<number | null>(null);
 
   //Estados para busqueda y seleccion de imagenes
-  const [imageSuggestions, setImageSuggestions] = useState<string[]>([]);
+  // const [imageSuggestions, setImageSuggestions] = useState<string[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  // const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [openImageModalLabelId, setOpenImageModalLabelId] = useState<number | null>(null);
+
 
   const [darkMode, setDarkMode] = useState(false);
 
@@ -149,22 +153,31 @@ function App() {
     setSearchError(false);
   };
 
-  // Función para buscar imágenes
-  const fetchImageSuggestions = async (word: string, example: string) => {
+  // Función para buscar imágenes para una etiqueta específica
+  const fetchImageSuggestionsForLabel = async (labelId: number, word: string, example: string) => {
     try {
-      // Construir el query; aquí usamos la palabra y el ejemplo para mayor relevancia
+      // Construir el query combinando la palabra y el ejemplo
       const query = `${word} ${example}`.trim();
       const response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
       const data = await response.json();
-      if (!data.error) {
-        setImageSuggestions(data.images);
-        // Por defecto, seleccionamos la primera imagen
-        setSelectedImage(data.images[0] || null);
-      } else {
-        console.error('Error al buscar imágenes:', data.error);
-      }
+      setLabels(prevLabels =>
+        prevLabels.map(label =>
+          label.id === labelId
+            ? {
+                ...label,
+                imageSuggestions: !data.error ? data.images : [],
+                selectedImage: !data.error && data.images.length > 0 ? data.images[0] : null,
+              }
+            : label
+        )
+      );
     } catch (error) {
-      console.error('Error al buscar imágenes:', error);
+      console.error('Error al buscar imágenes para label:', error);
+      setLabels(prevLabels =>
+        prevLabels.map(label =>
+          label.id === labelId ? { ...label, imageSuggestions: [], selectedImage: null } : label
+        )
+      );
     }
   };
 
@@ -194,19 +207,21 @@ function App() {
         setSnackbar({ open: true, message: 'La palabra ya está en la cola.', severity: 'error' });
         return;
       }
-      // Agregar la nueva label al principio de la cola
-      setLabels((prev) => [
-        {
-          id: Date.now(),
-          text: data.word,
-          ipa: data.ipa,
-          meaning: data.meaning,
-          example: data.example,
-          isEditing: false,
-        },
-        ...prev,
-      ]);
-      fetchImageSuggestions(data.word, data.meaning);
+      // Crear la nueva etiqueta inicializada con propiedades de imagen vacías
+      const newLabel: Label = {
+        id: Date.now(),
+        text: data.word,
+        ipa: data.ipa,
+        meaning: data.meaning,
+        example: data.example,
+        isEditing: false,
+        imageSuggestions: [],
+        selectedImage: null,
+      };
+      // Agregar la etiqueta al estado
+      setLabels((prev) => [newLabel, ...prev]);
+      // Llamar a la función para buscar imágenes para esta etiqueta
+      fetchImageSuggestionsForLabel(newLabel.id, newLabel.text, newLabel.example);
       setLoadingMessage('');
     } catch (error) {
       console.error('Error al buscar la palabra:', error);
@@ -598,20 +613,20 @@ const handleApprove = async (label: Label) => {
                   </>
                 )}
 
-                {/* Vista previa de la imagen */}
+                {/* Vista previa de la imagen para esta etiqueta */}
                 <Box
-                  onClick={() => setIsImageModalOpen(true)}
+                  onClick={() => setOpenImageModalLabelId(label.id)}
                   sx={{ cursor: 'pointer', mt: 1 }}
                 >
-                  {selectedImage ? (
+                  {label.selectedImage ? (
                     <img
-                      src={selectedImage}
+                      src={label.selectedImage}
                       alt={label.text}
                       style={{ maxWidth: '100%', borderRadius: '4px' }}
                     />
                   ) : (
                     <Typography variant="body2" color="textSecondary">
-                      No image available
+                      No se encontraron imágenes. (Click para intentar)
                     </Typography>
                   )}
                 </Box>
@@ -666,69 +681,85 @@ const handleApprove = async (label: Label) => {
             ))}
           </Box>
 
-          {/* Modal para selección de imágenes */}
-          {isImageModalOpen && (
-            <Box
-              sx={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                backgroundColor: 'rgba(0,0,0,0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 1500,
-              }}
-              onClick={() => setIsImageModalOpen(false)}
-            >
+          {/* Modal para selección de imágenes para la etiqueta actual */}
+          {openImageModalLabelId && (() => {
+            const currentLabel = labels.find((l) => l.id === openImageModalLabelId);
+            if (!currentLabel) return null;
+            return (
               <Box
                 sx={{
-                  backgroundColor: 'white',
-                  padding: 2,
-                  borderRadius: 2,
-                  width: '90%',
-                  maxWidth: 600,
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1500,
                 }}
-                onClick={(e) => e.stopPropagation()}
+                onClick={() => setOpenImageModalLabelId(null)}
               >
-                <Typography variant="h6" gutterBottom>
-                  Selecciona una imagen
-                </Typography>
                 <Box
                   sx={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 2,
+                    backgroundColor: 'white',
+                    padding: 2,
+                    borderRadius: 2,
+                    width: '90%',
+                    maxWidth: 600,
                   }}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  {imageSuggestions.map((imgUrl, index) => (
-                    <Box
-                      key={index}
-                      sx={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        setSelectedImage(imgUrl);
-                        setIsImageModalOpen(false);
-                      }}
-                    >
-                      <img
-                        src={imgUrl}
-                        alt={`suggestion-${index}`}
-                        style={{
-                          width: '100%',
-                          borderRadius: '4px',
-                          border:
-                            selectedImage === imgUrl ? '2px solid blue' : 'none',
-                        }}
-                      />
-                    </Box>
-                  ))}
-                  {/* Opcional: Agrega un Box adicional para la opción de subir imagen personalizada */}
+                  <Typography variant="h6" gutterBottom>
+                    Selecciona una imagen para "{currentLabel.text}"
+                  </Typography>
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: 2,
+                    }}
+                  >
+                    {currentLabel.imageSuggestions && currentLabel.imageSuggestions.length > 0 ? (
+                      currentLabel.imageSuggestions.map((imgUrl, index) => (
+                        <Box
+                          key={index}
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => {
+                            setLabels((prevLabels) =>
+                              prevLabels.map((l) =>
+                                l.id === currentLabel.id ? { ...l, selectedImage: imgUrl } : l
+                              )
+                            );
+                            setOpenImageModalLabelId(null);
+                          }}
+                        >
+                          <img
+                            src={imgUrl}
+                            alt={`suggestion-${index}`}
+                            style={{
+                              width: '100%',
+                              borderRadius: '4px',
+                              border:
+                                currentLabel.selectedImage === imgUrl
+                                  ? '2px solid blue'
+                                  : 'none',
+                            }}
+                          />
+                        </Box>
+                      ))
+                    ) : (
+                      <Typography variant="body2">
+                        No se encontraron imágenes.
+                      </Typography>
+                    )}
+                    {/* Opcional: aquí podrías agregar un Box para subir una imagen personalizada */}
+                  </Box>
                 </Box>
               </Box>
-            </Box>
-          )}
+            );
+          })()}
         </Container>
 
         <Snackbar
