@@ -150,7 +150,7 @@ function App() {
   };
 
   // Función para buscar imágenes
-  const fetchImageSuggestions = async (word: string, meaning: string, example: string) => {
+  const fetchImageSuggestions = async (word: string, example: string) => {
     try {
       // Construir el query; aquí usamos la palabra y el ejemplo para mayor relevancia
       const query = `${word} ${example}`.trim();
@@ -206,7 +206,7 @@ function App() {
         },
         ...prev,
       ]);
-      fetchImageSuggestions(data.word, data.meaning, data.example);
+      fetchImageSuggestions(data.word, data.meaning);
       setLoadingMessage('');
     } catch (error) {
       console.error('Error al buscar la palabra:', error);
