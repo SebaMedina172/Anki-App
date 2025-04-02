@@ -62,6 +62,11 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingLabelId, setProcessingLabelId] = useState<number | null>(null);
 
+  //Estados para busqueda y seleccion de imagenes
+  const [imageSuggestions, setImageSuggestions] = useState<string[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+
   const [darkMode, setDarkMode] = useState(false);
 
   const theme = createTheme({
@@ -144,6 +149,25 @@ function App() {
     setSearchError(false);
   };
 
+  // Función para buscar imágenes
+  const fetchImageSuggestions = async (word: string, meaning: string, example: string) => {
+    try {
+      // Construir el query; aquí usamos la palabra y el ejemplo para mayor relevancia
+      const query = `${word} ${example}`.trim();
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+      const data = await response.json();
+      if (!data.error) {
+        setImageSuggestions(data.images);
+        // Por defecto, seleccionamos la primera imagen
+        setSelectedImage(data.images[0] || null);
+      } else {
+        console.error('Error al buscar imágenes:', data.error);
+      }
+    } catch (error) {
+      console.error('Error al buscar imágenes:', error);
+    }
+  };
+
   // Función para buscar la palabra en el backend (GET /search)
   // Se mantiene igual ya que sigue llamando al backend para búsqueda en el diccionario
   const handleSearch = async () => {
@@ -182,6 +206,7 @@ function App() {
         },
         ...prev,
       ]);
+      fetchImageSuggestions(data.word, data.meaning, data.example);
       setLoadingMessage('');
     } catch (error) {
       console.error('Error al buscar la palabra:', error);
@@ -207,13 +232,14 @@ const handleApprove = async (label: Label) => {
         IPA: label.ipa.trim(),
         Meaning: label.meaning.trim(),
         Example: label.example.trim(),
+        Image: selectedImage || '',
       },
       // Incluimos audio: se le indicará a AnkiConnect que descargue los archivos desde estas URLs.
       audio: [
         {
           url: getTTSUrl(label.text, selectedLanguage),
           filename: `${label.text.toLowerCase()}_word.mp3`,
-          fields: ["Sound"] // Este campo se añadirá automáticamente a tu nota
+          fields: ["Sound"] 
         },
         {
           url: getTTSUrl(label.meaning, selectedLanguage),
@@ -508,7 +534,7 @@ const handleApprove = async (label: Label) => {
             )}
 
             {labels.map((label) => (
-             <Box
+              <Box
                 key={label.id}
                 sx={{
                   mt: 2,
@@ -524,7 +550,9 @@ const handleApprove = async (label: Label) => {
                   transition: 'all 0.3s ease-in-out',
                 }}
               >
-                <Typography variant="h6"><b>Word:</b> {label.text}</Typography>
+                <Typography variant="h6">
+                  <b>Word:</b> {label.text}
+                </Typography>
 
                 {label.isEditing ? (
                   <Stack spacing={2} sx={{ mt: 1, flexWrap: 'wrap' }}>
@@ -532,31 +560,61 @@ const handleApprove = async (label: Label) => {
                       label="IPA"
                       variant="outlined"
                       value={label.ipa}
-                      onChange={(e) => updateLabelField(label.id, 'ipa', e.target.value)}
+                      onChange={(e) =>
+                        updateLabelField(label.id, 'ipa', e.target.value)
+                      }
                       fullWidth
                     />
                     <TextField
                       label="Meaning"
                       variant="outlined"
                       value={label.meaning}
-                      onChange={(e) => updateLabelField(label.id, 'meaning', e.target.value)}
+                      onChange={(e) =>
+                        updateLabelField(label.id, 'meaning', e.target.value)
+                      }
                       fullWidth
                     />
                     <TextField
                       label="Example"
                       variant="outlined"
                       value={label.example}
-                      onChange={(e) => updateLabelField(label.id, 'example', e.target.value)}
+                      onChange={(e) =>
+                        updateLabelField(label.id, 'example', e.target.value)
+                      }
                       fullWidth
                     />
                   </Stack>
                 ) : (
                   <>
-                    <Typography><b>IPA:</b> {label.ipa}</Typography>
-                    <Typography><b>Meaning:</b> {label.meaning}</Typography>
-                    <Typography><b>Example:</b> {label.example}</Typography>
+                    <Typography>
+                      <b>IPA:</b> {label.ipa}
+                    </Typography>
+                    <Typography>
+                      <b>Meaning:</b> {label.meaning}
+                    </Typography>
+                    <Typography>
+                      <b>Example:</b> {label.example}
+                    </Typography>
                   </>
                 )}
+
+                {/* Vista previa de la imagen */}
+                <Box
+                  onClick={() => setIsImageModalOpen(true)}
+                  sx={{ cursor: 'pointer', mt: 1 }}
+                >
+                  {selectedImage ? (
+                    <img
+                      src={selectedImage}
+                      alt={label.text}
+                      style={{ maxWidth: '100%', borderRadius: '4px' }}
+                    />
+                  ) : (
+                    <Typography variant="body2" color="textSecondary">
+                      No image available
+                    </Typography>
+                  )}
+                </Box>
 
                 <Stack
                   direction={{ xs: 'column', sm: 'row' }}
@@ -569,7 +627,8 @@ const handleApprove = async (label: Label) => {
                     disabled={isProcessing || label.isEditing}
                     sx={{
                       transition: 'all 0.3s ease-in-out',
-                      color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
+                      color: (theme) =>
+                        theme.palette.mode === 'dark' ? '#333' : '#fff',
                     }}
                     onClick={() => handleApprove(label)}
                   >
@@ -580,10 +639,13 @@ const handleApprove = async (label: Label) => {
                     color="error"
                     sx={{
                       transition: 'all 0.3s ease-in-out',
-                      color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
+                      color: (theme) =>
+                        theme.palette.mode === 'dark' ? '#333' : '#fff',
                     }}
                     disabled={label.isEditing}
-                    onClick={() => setLabels((prev) => prev.filter((l) => l.id !== label.id))}
+                    onClick={() =>
+                      setLabels((prev) => prev.filter((l) => l.id !== label.id))
+                    }
                   >
                     Rechazar
                   </Button>
@@ -592,7 +654,8 @@ const handleApprove = async (label: Label) => {
                     color={label.isEditing ? 'primary' : 'warning'}
                     sx={{
                       transition: 'all 0.3s ease-in-out',
-                      color: (theme) => (theme.palette.mode === 'dark' ? '#333' : '#fff'),
+                      color: (theme) =>
+                        theme.palette.mode === 'dark' ? '#333' : '#fff',
                     }}
                     onClick={() => toggleEditLabel(label.id)}
                   >
@@ -602,6 +665,70 @@ const handleApprove = async (label: Label) => {
               </Box>
             ))}
           </Box>
+
+          {/* Modal para selección de imágenes */}
+          {isImageModalOpen && (
+            <Box
+              sx={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1500,
+              }}
+              onClick={() => setIsImageModalOpen(false)}
+            >
+              <Box
+                sx={{
+                  backgroundColor: 'white',
+                  padding: 2,
+                  borderRadius: 2,
+                  width: '90%',
+                  maxWidth: 600,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Typography variant="h6" gutterBottom>
+                  Selecciona una imagen
+                </Typography>
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 2,
+                  }}
+                >
+                  {imageSuggestions.map((imgUrl, index) => (
+                    <Box
+                      key={index}
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setSelectedImage(imgUrl);
+                        setIsImageModalOpen(false);
+                      }}
+                    >
+                      <img
+                        src={imgUrl}
+                        alt={`suggestion-${index}`}
+                        style={{
+                          width: '100%',
+                          borderRadius: '4px',
+                          border:
+                            selectedImage === imgUrl ? '2px solid blue' : 'none',
+                        }}
+                      />
+                    </Box>
+                  ))}
+                  {/* Opcional: Agrega un Box adicional para la opción de subir imagen personalizada */}
+                </Box>
+              </Box>
+            </Box>
+          )}
         </Container>
 
         <Snackbar
