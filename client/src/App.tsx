@@ -66,7 +66,7 @@ function App() {
 
   //Estados para busqueda y seleccion de imagenes
   // const [imageSuggestions, setImageSuggestions] = useState<string[]>([]);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  // const [selectedImage, setSelectedImage] = useState<string | null>(null);
   // const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [openImageModalLabelId, setOpenImageModalLabelId] = useState<number | null>(null);
 
@@ -247,7 +247,7 @@ const handleApprove = async (label: Label) => {
         IPA: label.ipa.trim(),
         Meaning: label.meaning.trim(),
         Example: label.example.trim(),
-        Image: selectedImage || '',
+        Image: label.selectedImage || '',
       },
       // Incluimos audio: se le indicará a AnkiConnect que descargue los archivos desde estas URLs.
       audio: [
