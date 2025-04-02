@@ -16,6 +16,8 @@ app.use(cors({
 }));
 app.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
+require('dotenv').config();
+
 // Determina la ruta base de Anki según el sistema operativo
 function getAnkiBasePath() {
   const platform = process.platform;
@@ -294,6 +296,35 @@ app.get('/search', async (req, res) => {
     });
   } catch (error) {
     console.error('Error en /search:', error.message);
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+app.get('/search-image', async (req, res) => {
+  const query = req.query.query;
+  if (!query) {
+    return res.status(400).json({ error: 'Missing query parameter' });
+  }
+  try {
+    const apiKey = process.env.PIXABAY_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'PIXABAY_API_KEY no está definida' });
+    }
+    // Realiza la búsqueda en Pixabay
+    const response = await axios.get('https://pixabay.com/api/', {
+      params: {
+        key: apiKey,
+        q: query,
+        per_page: 5,
+        image_type: 'photo',
+        safesearch: true,
+      }
+    });
+    // Extraemos las URL de las imágenes; en Pixabay suelen estar en response.data.hits
+    const images = response.data.hits.map(hit => hit.webformatURL);
+    res.json({ images });
+  } catch (error) {
+    console.error('Error en /search-image:', error.message);
     res.status(500).json({ error: error.toString() });
   }
 });
