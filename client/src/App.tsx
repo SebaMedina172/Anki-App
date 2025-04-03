@@ -727,7 +727,7 @@ const handleApprove = async (label: Label) => {
                           key={index}
                           sx={{ cursor: 'pointer' }}
                           onClick={() => {
-                            setLabels((prevLabels) =>
+                            setLabels(prevLabels =>
                               prevLabels.map((l) =>
                                 l.id === currentLabel.id ? { ...l, selectedImage: imgUrl } : l
                               )
@@ -754,7 +754,44 @@ const handleApprove = async (label: Label) => {
                         No se encontraron imágenes.
                       </Typography>
                     )}
-                    {/* Opcional: aquí podrías agregar un Box para subir una imagen personalizada */}
+                    {/* Opción para subir imagen personalizada */}
+                    <Box
+                      sx={{
+                        cursor: 'pointer',
+                        border: '2px dashed gray',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: 100,
+                      }}
+                    >
+                      <label style={{ cursor: 'pointer', textAlign: 'center' }}>
+                        Subir imagen
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onload = (event) => {
+                                setLabels(prevLabels =>
+                                  prevLabels.map((l) =>
+                                    l.id === currentLabel.id
+                                      ? { ...l, selectedImage: event.target?.result as string }
+                                      : l
+                                  )
+                                );
+                                setOpenImageModalLabelId(null);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                    </Box>
                   </Box>
                 </Box>
               </Box>
