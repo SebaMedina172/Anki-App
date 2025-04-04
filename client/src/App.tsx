@@ -24,6 +24,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { GlobalStyles } from '@mui/material';
+import stopword from 'stopword';
 
 <GlobalStyles styles={{
   body: {
@@ -153,15 +154,38 @@ function App() {
     setSearchError(false);
   };
 
+  
+  const extractKeywords = (text: string, lang: string = 'en'): string => {
+    // Divide el texto en palabras
+    const words = text.split(' ');
+    // Obtiene la lista de stopwords para el idioma solicitado.
+    // La librería stopword tiene propiedades para "en", "es", etc.
+    // Si no existe para el idioma, por defecto se usa 'en'.
+    const stopwords = stopword[lang as keyof typeof stopword] || stopword.eng;
+    const customStopwords: string[] = stopwords as string[];
+    // Filtra y retorna un string con las palabras clave.
+    return stopword.removeStopwords(words, customStopwords).join(' ');
+  };
+
   // Función para buscar imágenes para una etiqueta específica
-  const fetchImageSuggestionsForLabel = async (labelId: number, word: string, example: string, meaning: string) => {
+  const fetchImageSuggestionsForLabel = async (
+    labelId: number,
+    word: string,
+    example: string,
+    meaning: string,
+    lang: string = 'en'  // Puedes pasar el idioma según la card
+  ) => {
     try {
-      // Si el ejemplo indica que no se encontró un ejemplo válido, usamos la palabra y el significado
-      const query = example.toLowerCase().includes("example not found")
-        ? `${word} ${meaning}`.trim()
-        : `${word} ${example}`.trim();
+      // Si el ejemplo es inválido, usamos el significado; de lo contrario, usamos el ejemplo
+      const baseText = example.toLowerCase().includes("example not found")
+        ? extractKeywords(meaning, lang)
+        : extractKeywords(example, lang);
         
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+      const query = `${word} ${baseText}`.trim();
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`
+      );
       const data = await response.json();
       setLabels(prevLabels =>
         prevLabels.map(label =>
