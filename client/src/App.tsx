@@ -173,20 +173,28 @@ function App() {
     word: string,
     example: string,
     meaning: string,
-    lang: string = 'en'  // Puedes pasar el idioma según la card
+    lang: string = 'en'
   ) => {
     try {
-      // Si el ejemplo es inválido, usamos el significado; de lo contrario, usamos el ejemplo
-      const baseText = example.toLowerCase().includes("example not found")
+      // Construir el query principal
+      let baseText = example.toLowerCase().includes("example not found")
         ? extractKeywords(meaning, lang)
         : extractKeywords(example, lang);
-        
-      const query = `${word} ${baseText}`.trim();
+      let query = `${word} ${baseText}`.trim();
       
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`
-      );
-      const data = await response.json();
+      // Intentamos la búsqueda inicial
+      let response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+      let data = await response.json();
+      
+      // Si no se encontraron imágenes, reintentamos con un query de fallback
+      if (!data.error && (!data.images || data.images.length === 0)) {
+        // Fallback: usar la palabra con un modificador genérico, por ejemplo "photo"
+        query = `${word} photo`;
+        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+        data = await response.json();
+      }
+      
+      // Actualizamos la etiqueta con los resultados obtenidos (vacío si error)
       setLabels(prevLabels =>
         prevLabels.map(label =>
           label.id === labelId
@@ -202,7 +210,9 @@ function App() {
       console.error('Error al buscar imágenes para label:', error);
       setLabels(prevLabels =>
         prevLabels.map(label =>
-          label.id === labelId ? { ...label, imageSuggestions: [], selectedImage: null } : label
+          label.id === labelId
+            ? { ...label, imageSuggestions: [], selectedImage: null }
+            : label
         )
       );
     }
