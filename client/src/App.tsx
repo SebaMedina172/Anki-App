@@ -702,13 +702,13 @@ const handleApprove = async (label: Label) => {
                 onClick={() => setOpenImageModalLabelId(null)}
               >
                 <Box
-                  sx={{
-                    backgroundColor: 'white',
+                  sx={(theme) => ({
+                    backgroundColor: theme.palette.mode === 'dark' ? '#424242' : 'white',
                     padding: 2,
                     borderRadius: 2,
                     width: '90%',
                     maxWidth: 600,
-                  }}
+                  })}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <Typography variant="h6" gutterBottom>
