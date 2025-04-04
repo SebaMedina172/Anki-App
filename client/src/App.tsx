@@ -154,10 +154,13 @@ function App() {
   };
 
   // Función para buscar imágenes para una etiqueta específica
-  const fetchImageSuggestionsForLabel = async (labelId: number, word: string, example: string) => {
+  const fetchImageSuggestionsForLabel = async (labelId: number, word: string, example: string, meaning: string) => {
     try {
-      // Construir el query combinando la palabra y el ejemplo
-      const query = `${word} ${example}`.trim();
+      // Si el ejemplo indica que no se encontró un ejemplo válido, usamos la palabra y el significado
+      const query = example.toLowerCase().includes("example not found")
+        ? `${word} ${meaning}`.trim()
+        : `${word} ${example}`.trim();
+        
       const response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
       const data = await response.json();
       setLabels(prevLabels =>
@@ -221,7 +224,7 @@ function App() {
       // Agregar la etiqueta al estado
       setLabels((prev) => [newLabel, ...prev]);
       // Llamar a la función para buscar imágenes para esta etiqueta
-      fetchImageSuggestionsForLabel(newLabel.id, newLabel.text, newLabel.example);
+      fetchImageSuggestionsForLabel(newLabel.id, newLabel.text, newLabel.example, newLabel.meaning);
       setLoadingMessage('');
     } catch (error) {
       console.error('Error al buscar la palabra:', error);
