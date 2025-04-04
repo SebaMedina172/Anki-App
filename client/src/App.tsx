@@ -24,7 +24,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { GlobalStyles } from '@mui/material';
-import { default as stopword } from 'stopword';
+import * as stopword from 'stopword';
 
 <GlobalStyles styles={{
   body: {
