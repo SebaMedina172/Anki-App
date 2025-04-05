@@ -23,6 +23,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import SettingsIcon from '@mui/icons-material/Settings';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { GlobalStyles } from '@mui/material';
 import * as stopword from 'stopword';
 
@@ -42,6 +43,7 @@ interface Label {
   isEditing: boolean;
   imageSuggestions?: string[];  // URLs sugeridas para esta etiqueta
   selectedImage?: string | null; // URL de la imagen elegida para esta etiqueta
+  refreshPage?: number;          // Página actual para la búsqueda de imágenes
 }
 
 function App() {
@@ -173,42 +175,44 @@ function App() {
     word: string,
     example: string,
     meaning: string,
-    lang: string = 'en'
+    lang: string = 'en',
+    page: number = 1
   ) => {
     try {
       let query: string;
       let data: any;
   
-      // Primer intento: Usa el ejemplo si es válido, o el significado en caso de "Example not found".
+      // Primer intento: Usa el ejemplo si es válido; de lo contrario, usa el significado
       const baseText = example.toLowerCase().includes("example not found")
         ? extractKeywords(meaning, lang)
         : extractKeywords(example, lang);
       query = `${word} ${baseText}`.trim();
-      let response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+      
+      // Incluir el parámetro "page" en la URL de la solicitud
+      let response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}`);
       data = await response.json();
   
-      // Segundo intento: Si no hay imágenes, usa un query simple con "icon".
+      // Segundo intento: Si no hay imágenes, usa "icon"
       if (data.error || !data.images || data.images.length === 0) {
         query = `${word} icon`;
-        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}`);
         data = await response.json();
       }
   
-      // Tercer intento: Si aún no hay, usa "illustration".
+      // Tercer intento: Si aún no hay, usa "illustration"
       if (data.error || !data.images || data.images.length === 0) {
         query = `${word} illustration`;
-        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}`);
         data = await response.json();
       }
   
-      // Fallback definitivo: Si nada retorna, usar una imagen por defecto.
+      // Fallback definitivo: Si nada retorna, usar una imagen por defecto
       if (data.error || !data.images || data.images.length === 0) {
-        // Genera un placeholder básico; por ejemplo, con via.placeholder.com
         const defaultImage = `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`;
         data = { images: [defaultImage] };
       }
   
-      // Actualiza la etiqueta correspondiente en el estado
+      // Actualiza la etiqueta correspondiente en el estado, guardando también la página usada
       setLabels(prevLabels =>
         prevLabels.map(label =>
           label.id === labelId
@@ -216,6 +220,7 @@ function App() {
                 ...label,
                 imageSuggestions: data.images,
                 selectedImage: data.images[0],
+                refreshPage: page,
               }
             : label
         )
@@ -228,6 +233,20 @@ function App() {
         )
       );
     }
+  };
+
+  const refreshImageSuggestionsForLabel = async (
+    labelId: number,
+    word: string,
+    example: string,
+    meaning: string,
+    lang: string = 'en'
+  ) => {
+    // Buscar la etiqueta para obtener la página actual
+    const label = labels.find(l => l.id === labelId);
+    const currentPage = label?.refreshPage || 1;
+    const newPage = currentPage + 1;
+    await fetchImageSuggestionsForLabel(labelId, word, example, meaning, lang, newPage);
   };
 
   // Función para buscar la palabra en el backend (GET /search)
@@ -730,122 +749,145 @@ const handleApprove = async (label: Label) => {
             ))}
           </Box>
 
-          {/* Modal para selección de imágenes para la etiqueta actual */}
-          {openImageModalLabelId && (() => {
-            const currentLabel = labels.find((l) => l.id === openImageModalLabelId);
-            if (!currentLabel) return null;
-            return (
+          import RefreshIcon from '@mui/icons-material/Refresh';
+
+        {/* Modal para selección de imágenes para la etiqueta actual */}
+        {openImageModalLabelId && (() => {
+          const currentLabel = labels.find((l) => l.id === openImageModalLabelId);
+          if (!currentLabel) return null;
+          return (
+            <Box
+              sx={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1500,
+              }}
+              onClick={() => setOpenImageModalLabelId(null)}
+            >
               <Box
-                sx={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  backgroundColor: 'rgba(0,0,0,0.5)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 1500,
-                }}
-                onClick={() => setOpenImageModalLabelId(null)}
+                sx={(theme) => ({
+                  backgroundColor: theme.palette.mode === 'dark' ? '#424242' : 'white',
+                  padding: 2,
+                  borderRadius: 2,
+                  width: '90%',
+                  maxWidth: 600,
+                })}
+                onClick={(e) => e.stopPropagation()}
               >
                 <Box
-                  sx={(theme) => ({
-                    backgroundColor: theme.palette.mode === 'dark' ? '#424242' : 'white',
-                    padding: 2,
-                    borderRadius: 2,
-                    width: '90%',
-                    maxWidth: 600,
-                  })}
-                  onClick={(e) => e.stopPropagation()}
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    mb: 1,
+                  }}
                 >
                   <Typography variant="h6" gutterBottom>
                     Selecciona una imagen para "{currentLabel.text}"
                   </Typography>
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: 2,
-                    }}
+                  <IconButton
+                    onClick={() =>
+                      refreshImageSuggestionsForLabel(
+                        currentLabel.id,
+                        currentLabel.text,
+                        currentLabel.example,
+                        currentLabel.meaning
+                      )
+                    }
+                    size="small"
                   >
-                    {currentLabel.imageSuggestions && currentLabel.imageSuggestions.length > 0 ? (
-                      currentLabel.imageSuggestions.map((imgUrl, index) => (
-                        <Box
-                          key={index}
-                          sx={{ cursor: 'pointer' }}
-                          onClick={() => {
-                            setLabels(prevLabels =>
-                              prevLabels.map((l) =>
-                                l.id === currentLabel.id ? { ...l, selectedImage: imgUrl } : l
-                              )
-                            );
-                            setOpenImageModalLabelId(null);
-                          }}
-                        >
-                          <img
-                            src={imgUrl}
-                            alt={`suggestion-${index}`}
-                            style={{
-                              width: '100%',
-                              borderRadius: '4px',
-                              border:
-                                currentLabel.selectedImage === imgUrl
-                                  ? '2px solid blue'
-                                  : 'none',
-                            }}
-                          />
-                        </Box>
-                      ))
-                    ) : (
-                      <Typography variant="body2">
-                        No se encontraron imágenes.
-                      </Typography>
-                    )}
-                    {/* Opción para subir imagen personalizada */}
-                    <Box
-                      sx={{
-                        cursor: 'pointer',
-                        border: '2px dashed gray',
-                        borderRadius: '4px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: 100,
-                      }}
-                    >
-                      <label style={{ cursor: 'pointer', textAlign: 'center' }}>
-                        Subir imagen
-                        <input
-                          type="file"
-                          accept="image/*"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (event) => {
-                                setLabels(prevLabels =>
-                                  prevLabels.map((l) =>
-                                    l.id === currentLabel.id
-                                      ? { ...l, selectedImage: event.target?.result as string }
-                                      : l
-                                  )
-                                );
-                                setOpenImageModalLabelId(null);
-                              };
-                              reader.readAsDataURL(file);
-                            }
+                    <RefreshIcon />
+                  </IconButton>
+                </Box>
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 2,
+                  }}
+                >
+                  {currentLabel.imageSuggestions && currentLabel.imageSuggestions.length > 0 ? (
+                    currentLabel.imageSuggestions.map((imgUrl, index) => (
+                      <Box
+                        key={index}
+                        sx={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          setLabels((prevLabels) =>
+                            prevLabels.map((l) =>
+                              l.id === currentLabel.id
+                                ? { ...l, selectedImage: imgUrl }
+                                : l
+                            )
+                          );
+                          setOpenImageModalLabelId(null);
+                        }}
+                      >
+                        <img
+                          src={imgUrl}
+                          alt={`suggestion-${index}`}
+                          style={{
+                            width: '100%',
+                            borderRadius: '4px',
+                            border: currentLabel.selectedImage === imgUrl ? '2px solid blue' : 'none',
                           }}
                         />
-                      </label>
-                    </Box>
+                      </Box>
+                    ))
+                  ) : (
+                    <Typography variant="body2">
+                      No se encontraron imágenes.
+                    </Typography>
+                  )}
+                  {/* Opción para subir imagen personalizada */}
+                  <Box
+                    sx={{
+                      cursor: 'pointer',
+                      border: '2px dashed gray',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      height: 100,
+                    }}
+                  >
+                    <label style={{ cursor: 'pointer', textAlign: 'center' }}>
+                      Subir imagen
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              setLabels((prevLabels) =>
+                                prevLabels.map((l) =>
+                                  l.id === currentLabel.id
+                                    ? { ...l, selectedImage: event.target?.result as string }
+                                    : l
+                                )
+                              );
+                              setOpenImageModalLabelId(null);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
                   </Box>
                 </Box>
               </Box>
-            );
-          })()}
+            </Box>
+          );
+        })()}
         </Container>
 
         <Snackbar
