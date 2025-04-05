@@ -176,25 +176,30 @@ function App() {
     lang: string = 'en'
   ) => {
     try {
-      // Construir el query principal
+      // Primer query: extraer keywords del ejemplo o del significado
       let baseText = example.toLowerCase().includes("example not found")
         ? extractKeywords(meaning, lang)
         : extractKeywords(example, lang);
       let query = `${word} ${baseText}`.trim();
       
-      // Intentamos la búsqueda inicial
       let response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
       let data = await response.json();
       
-      // Si no se encontraron imágenes, reintentamos con un query de fallback
+      // Si no se encontraron imágenes, intenta fallback con "photo"
       if (!data.error && (!data.images || data.images.length === 0)) {
-        // Fallback: usar la palabra con un modificador genérico, por ejemplo "photo"
         query = `${word} photo`;
         response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
         data = await response.json();
       }
       
-      // Actualizamos la etiqueta con los resultados obtenidos (vacío si error)
+      // Si aún no hay resultados, intenta agregar un modificador basado en el significado
+      if (!data.error && (!data.images || data.images.length === 0)) {
+        query = `${word} ${extractKeywords(meaning, lang)} photo`;
+        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
+        data = await response.json();
+      }
+      
+      // Actualiza la etiqueta con los resultados, o deja vacíos si no hay
       setLabels(prevLabels =>
         prevLabels.map(label =>
           label.id === labelId
@@ -210,9 +215,7 @@ function App() {
       console.error('Error al buscar imágenes para label:', error);
       setLabels(prevLabels =>
         prevLabels.map(label =>
-          label.id === labelId
-            ? { ...label, imageSuggestions: [], selectedImage: null }
-            : label
+          label.id === labelId ? { ...label, imageSuggestions: [], selectedImage: null } : label
         )
       );
     }
