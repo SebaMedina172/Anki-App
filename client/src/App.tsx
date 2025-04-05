@@ -176,37 +176,46 @@ function App() {
     lang: string = 'en'
   ) => {
     try {
-      // Primer query: extraer keywords del ejemplo o del significado
-      let baseText = example.toLowerCase().includes("example not found")
+      let query: string;
+      let data: any;
+  
+      // Primer intento: Usa el ejemplo si es válido, o el significado en caso de "Example not found".
+      const baseText = example.toLowerCase().includes("example not found")
         ? extractKeywords(meaning, lang)
         : extractKeywords(example, lang);
-      let query = `${word} ${baseText}`.trim();
-      
+      query = `${word} ${baseText}`.trim();
       let response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
-      let data = await response.json();
-      
-      // Si no se encontraron imágenes, intenta fallback con "photo"
-      if (!data.error && (!data.images || data.images.length === 0)) {
-        query = `${word} photo`;
+      data = await response.json();
+  
+      // Segundo intento: Si no hay imágenes, usa un query simple con "icon".
+      if (data.error || !data.images || data.images.length === 0) {
+        query = `${word} icon`;
         response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
         data = await response.json();
       }
-      
-      // Si aún no hay resultados, intenta agregar un modificador basado en el significado
-      if (!data.error && (!data.images || data.images.length === 0)) {
-        query = `${word} ${extractKeywords(meaning, lang)} photo`;
+  
+      // Tercer intento: Si aún no hay, usa "illustration".
+      if (data.error || !data.images || data.images.length === 0) {
+        query = `${word} illustration`;
         response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}`);
         data = await response.json();
       }
-      
-      // Actualiza la etiqueta con los resultados, o deja vacíos si no hay
+  
+      // Fallback definitivo: Si nada retorna, usar una imagen por defecto.
+      if (data.error || !data.images || data.images.length === 0) {
+        // Genera un placeholder básico; por ejemplo, con via.placeholder.com
+        const defaultImage = `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`;
+        data = { images: [defaultImage] };
+      }
+  
+      // Actualiza la etiqueta correspondiente en el estado
       setLabels(prevLabels =>
         prevLabels.map(label =>
           label.id === labelId
             ? {
                 ...label,
-                imageSuggestions: !data.error ? data.images : [],
-                selectedImage: !data.error && data.images.length > 0 ? data.images[0] : null,
+                imageSuggestions: data.images,
+                selectedImage: data.images[0],
               }
             : label
         )
