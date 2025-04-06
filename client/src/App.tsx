@@ -23,7 +23,6 @@ import SearchIcon from '@mui/icons-material/Search';
 import SettingsIcon from '@mui/icons-material/Settings';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import { GlobalStyles } from '@mui/material';
 import * as stopword from 'stopword';
 
@@ -31,7 +30,6 @@ import * as stopword from 'stopword';
   body: {
     transition: 'background-color 0.3s ease, color 0.3s ease',
   },
-  // Puedes incluir aquí otras propiedades que quieras que tengan transición global
 }} />
 
 interface Label {
@@ -244,20 +242,6 @@ function App() {
     }
   };
 
-  const refreshImageSuggestionsForLabel = async (
-    labelId: number,
-    word: string,
-    example: string,
-    meaning: string,
-    lang: string = 'en'
-  ) => {
-    // Buscar la etiqueta para obtener la página actual
-    const label = labels.find(l => l.id === labelId);
-    const currentPage = label?.refreshPage || 1;
-    const newPage = currentPage + 1;
-    await fetchImageSuggestionsForLabel(labelId, word, example, meaning, lang, newPage);
-  };
-
   // Función para buscar la palabra en el backend (GET /search)
   // Se mantiene igual ya que sigue llamando al backend para búsqueda en el diccionario
   const handleSearch = async () => {
@@ -386,9 +370,16 @@ const handleApprove = async (label: Label) => {
 
   const toggleEditLabel = (id: number) => {
     setLabels((prev) =>
-      prev.map((label) =>
-        label.id === id ? { ...label, isEditing: !label.isEditing } : label
-      )
+      prev.map((label) => {
+        if (label.id === id) {
+          const newEditingState = !label.isEditing;
+          if (label.isEditing && !newEditingState) {
+            fetchImageSuggestionsForLabel(label.id, label.text, label.example, label.meaning);
+          }
+          return { ...label, isEditing: newEditingState };
+        }
+        return label;
+      })
     );
   };
 
@@ -799,19 +790,6 @@ const handleApprove = async (label: Label) => {
                   <Typography variant="h6" gutterBottom>
                     Selecciona una imagen para "{currentLabel.text}"
                   </Typography>
-                  <IconButton
-                    onClick={() =>
-                      refreshImageSuggestionsForLabel(
-                        currentLabel.id,
-                        currentLabel.text,
-                        currentLabel.example,
-                        currentLabel.meaning
-                      )
-                    }
-                    size="small"
-                  >
-                    <RefreshIcon />
-                  </IconButton>
                 </Box>
                 <Box
                   sx={{
