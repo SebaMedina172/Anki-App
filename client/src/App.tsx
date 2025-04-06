@@ -179,51 +179,60 @@ function App() {
     page: number = 1
   ) => {
     try {
-      let query: string;
-      let data: any;
-  
-      // Primer intento: Usa el ejemplo si es válido; de lo contrario, usa el significado
+      // Primer intento: Usamos el ejemplo si es válido; de lo contrario, el significado.
       const baseText = example.toLowerCase().includes("example not found")
         ? extractKeywords(meaning, lang)
         : extractKeywords(example, lang);
-      query = `${word} ${baseText}`.trim();
+      let query = `${word} ${baseText}`.trim();
       
-      // Incluir el parámetro "page" en la URL de la solicitud
-      let response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}`);
-      data = await response.json();
-  
-      // Segundo intento: Si no hay imágenes, usa "icon"
+      // Generamos un parámetro aleatorio para forzar variabilidad
+      const randomParam = Math.random().toString(36).substring(2, 8);
+      let url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}&r=${randomParam}`;
+      
+      let response = await fetch(url);
+      let data = await response.json();
+      
+      // Segundo intento: Si no hay imágenes, usamos "icon"
       if (data.error || !data.images || data.images.length === 0) {
         query = `${word} icon`;
-        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}`);
+        url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}&r=${Math.random().toString(36).substring(2, 8)}`;
+        response = await fetch(url);
         data = await response.json();
       }
-  
-      // Tercer intento: Si aún no hay, usa "illustration"
+      
+      // Tercer intento: Si aún no hay, usamos "illustration"
       if (data.error || !data.images || data.images.length === 0) {
         query = `${word} illustration`;
-        response = await fetch(`${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}`);
+        url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}&r=${Math.random().toString(36).substring(2, 8)}`;
+        response = await fetch(url);
         data = await response.json();
       }
-  
-      // Fallback definitivo: Si nada retorna, usar una imagen por defecto
+      
+      // Fallback definitivo: Si nada retorna, usar un placeholder
       if (data.error || !data.images || data.images.length === 0) {
         const defaultImage = `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`;
         data = { images: [defaultImage] };
       }
-  
-      // Actualiza la etiqueta correspondiente en el estado, guardando también la página usada
+      
+      // Actualizamos la etiqueta:
       setLabels(prevLabels =>
-        prevLabels.map(label =>
-          label.id === labelId
-            ? {
-                ...label,
-                imageSuggestions: data.images,
-                selectedImage: data.images[0],
-                refreshPage: page,
-              }
-            : label
-        )
+        prevLabels.map(label => {
+          if (label.id === labelId) {
+            // Si ya había sugerencias, filtramos las que ya aparecieron.
+            const prevImages = label.imageSuggestions || [];
+            // Filtramos las imágenes nuevas que ya no estén en prevImages.
+            const newImages = data.images.filter((img: string) => !prevImages.includes(img));
+            // Si newImages queda vacío, usamos data.images (la API pudo devolver resultados repetidos)
+            const finalImages = newImages.length > 0 ? newImages : data.images;
+            return {
+              ...label,
+              imageSuggestions: finalImages,
+              selectedImage: finalImages[0],
+              refreshPage: page,  // Guardamos la página actual
+            };
+          }
+          return label;
+        })
       );
     } catch (error) {
       console.error('Error al buscar imágenes para label:', error);
@@ -748,8 +757,6 @@ const handleApprove = async (label: Label) => {
               </Box>
             ))}
           </Box>
-
-          import RefreshIcon from '@mui/icons-material/Refresh';
 
         {/* Modal para selección de imágenes para la etiqueta actual */}
         {openImageModalLabelId && (() => {
