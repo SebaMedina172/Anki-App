@@ -97,12 +97,12 @@ function App() {
     try {
       setAnkiConnectError(null);
   
-      const proxyEndpoint = 'https://tu-api.com/anki-proxy'; // O '/anki-proxy' si front y server comparten dominio
+      const proxyEndpoint = 'https://anki-app-2yx0.onrender.com/anki-proxy'; //URL de la API, del server desplegado en Render.
   
       // Cabeceras comunes
       const headers = {
         'Content-Type': 'application/json',
-        'x-anki-url': url,    // ej: "http://127.0.0.1:8765"
+        'x-anki-url': url,    
       };
   
       // 1) Decks
@@ -112,7 +112,7 @@ function App() {
         body: JSON.stringify({
           action: 'deckNames',
           version: 6,
-          params: {}              // aunque a deckNames no le hagan falta params, los incluimos vacíos
+          params: {}              
         }),
       });
       const deckData = await deckResponse.json();
