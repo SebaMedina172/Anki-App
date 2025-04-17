@@ -97,37 +97,21 @@ function App() {
     try {
       setAnkiConnectError(null);
   
-      const proxyEndpoint = 'https://anki-app-2yx0.onrender.com/anki-proxy'; //URL de la API, del server desplegado en Render.
-  
-      // Cabeceras comunes
-      const headers = {
-        'Content-Type': 'application/json',
-        'x-anki-url': url,    
-      };
-  
       // 1) Decks
-      const deckResponse = await fetch(proxyEndpoint, {
+      const deckResponse = await fetch(url, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({
-          action: 'deckNames',
-          version: 6,
-          params: {}              
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'deckNames', version: 6 }),
       });
       const deckData = await deckResponse.json();
       if (deckData.error) throw new Error(deckData.error);
       const decks = deckData.result;
   
       // 2) Modelos
-      const modelResponse = await fetch(proxyEndpoint, {
+      const modelResponse = await fetch(url, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({
-          action: 'modelNames',
-          version: 6,
-          params: {}
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'modelNames', version: 6 }),
       });
       const modelData = await modelResponse.json();
       if (modelData.error) throw new Error(modelData.error);
@@ -135,19 +119,17 @@ function App() {
   
       setAvailableDecks(decks);
       setAvailableModels(models);
-      setAnkiConnectError(null);
-  
     } catch (error) {
       console.error('Error al obtener decks/modelos:', error);
       const errMsg = error instanceof Error ? error.message : String(error);
       setAnkiConnectError(
         errMsg.includes('ECONNREFUSED')
-          ? 'Anki no está abierto. Por favor, abre la aplicación Anki.'
-          : 'URL incorrecta o Anki Connect no responde.'
+          ? 'Anki no está abierto. Por favor, abre Anki.'
+          : 'URL incorrecta o AnkiConnect no responde.'
       );
       setAvailableDecks([]);
       setAvailableModels([]);
-      setSnackbar({ open: true, message: `Error: ${ankiConnectError || errMsg}`, severity: 'error' });
+      setSnackbar({ open: true, message: `Error: ${errMsg}`, severity: 'error' });
     } finally {
       setIsFetchingOptions(false);
     }
