@@ -92,48 +92,59 @@ function App() {
   };
   
 
-  // Función para obtener decks y modelos desde AnkiConnect directamente
   const fetchDecksAndModels = async (url: string) => {
     setIsFetchingOptions(true);
     try {
-      // Reiniciamos el error en cada intento
       setAnkiConnectError(null);
   
-      // Obtener decks desde AnkiConnect
-      const deckResponse = await fetch(url, {
+      const proxyEndpoint = 'https://tu-api.com/anki-proxy'; // O '/anki-proxy' si front y server comparten dominio
+  
+      // Cabeceras comunes
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-anki-url': url,    // ej: "http://127.0.0.1:8765"
+      };
+  
+      // 1) Decks
+      const deckResponse = await fetch(proxyEndpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'deckNames', version: 6 }),
+        headers,
+        body: JSON.stringify({
+          action: 'deckNames',
+          version: 6,
+          params: {}              // aunque a deckNames no le hagan falta params, los incluimos vacíos
+        }),
       });
       const deckData = await deckResponse.json();
-      if (deckData.error) {
-        throw new Error(deckData.error);
-      }
+      if (deckData.error) throw new Error(deckData.error);
       const decks = deckData.result;
   
-      // Obtener modelos desde AnkiConnect
-      const modelResponse = await fetch(url, {
+      // 2) Modelos
+      const modelResponse = await fetch(proxyEndpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'modelNames', version: 6 }),
+        headers,
+        body: JSON.stringify({
+          action: 'modelNames',
+          version: 6,
+          params: {}
+        }),
       });
       const modelData = await modelResponse.json();
-      if (modelData.error) {
-        throw new Error(modelData.error);
-      }
+      if (modelData.error) throw new Error(modelData.error);
       const models = modelData.result;
   
       setAvailableDecks(decks);
       setAvailableModels(models);
       setAnkiConnectError(null);
+  
     } catch (error) {
       console.error('Error al obtener decks/modelos:', error);
       const errMsg = error instanceof Error ? error.message : String(error);
-      if (errMsg.includes('ECONNREFUSED')) {
-        setAnkiConnectError('Anki no está abierto. Por favor, abre la aplicación Anki.');
-      } else {
-        setAnkiConnectError('URL incorrecta o Anki Connect no responde.');
-      }
+      setAnkiConnectError(
+        errMsg.includes('ECONNREFUSED')
+          ? 'Anki no está abierto. Por favor, abre la aplicación Anki.'
+          : 'URL incorrecta o Anki Connect no responde.'
+      );
       setAvailableDecks([]);
       setAvailableModels([]);
       setSnackbar({ open: true, message: `Error: ${ankiConnectError || errMsg}`, severity: 'error' });
