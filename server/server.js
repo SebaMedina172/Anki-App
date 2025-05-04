@@ -348,27 +348,52 @@ app.get('/search', async (req, res) => {
   }
 });
 
+// ======= Preview endpoint: Retorna 5 imagenes con su URL's =======
 app.get('/search-image', async (req, res) => {
   const query = req.query.query;
   if (!query) return res.status(400).json({ error: 'Missing query parameter' });
   try {
     const apiKey = process.env.PIXABAY_API_KEY;
-    const resp = await axios.get('https://pixabay.com/api/', { 
-      params: { 
-        key: apiKey, 
-        q: query, 
-        per_page: 1, 
-        image_type: 'photo', 
-        safesearch: true, 
-        } 
+    const resp = await axios.get('https://pixabay.com/api/', {
+      params: { key: apiKey, q: query, per_page: 5, image_type: 'photo', safesearch: true }
+    });
+    // send array of preview URLs and full URLs
+    const images = resp.data.hits.map(hit => ({
+      id: hit.id,
+      previewURL: hit.previewURL,
+      fullURL: hit.largeImageURL || hit.webformatURL
+    }));
+    res.json({ images });
+  } catch (error) {
+    console.error('Error in GET /search-image:', error.message);
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
+// ======= Descarga las imagens seleccionadas, en MEDIA PATH =======
+app.post('/save-image', upload.single('file'), async (req, res) => {
+  try {
+    let filename;
+    if (req.file) {
+      // user-uploaded image
+      filename = req.file.filename;
+    } else {
+      // download from remote URL
+      const imageUrl = req.body.url;
+      if (!imageUrl) return res.status(400).json({ error: 'Missing url in body' });
+      const ext = path.extname(new URL(imageUrl).pathname) || '.jpg';
+      filename = `${Date.now()}${ext}`;
+      const response = await axios.get(imageUrl, { responseType: 'stream' });
+      const dest = fs.createWriteStream(path.join(MEDIA_PATH, filename));
+      response.data.pipe(dest);
+      await new Promise((resolve, reject) => {
+        dest.on('finish', resolve);
+        dest.on('error', reject);
       });
-    const hit = resp.data.hits[0];
-    if (!hit) return res.status(404).json({ error: 'No image found' });
-    const filename = `${query.replace(/\W+/g, '_')}_${Date.now()}.jpg`;
-    await saveImageToMedia(hit.webformatURL, filename);
+    }
     res.json({ filename });
   } catch (error) {
-    console.error('Error en /search-image:', error.message);
+    console.error('Error in POST /save-image:', error.message);
     res.status(500).json({ error: error.toString() });
   }
 });
