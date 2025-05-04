@@ -6,10 +6,11 @@
     "axios": "^1.8.2",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "google-tts-api": "^2.0.0",
+    "google-tts-api": "^0.0.6",
     "ini": "^5.0.0",
-    "puppeteer": "^24.4.0",
-    "dotenv": "^16.4.7"
+    "multer": "^1.4.5-lts.2",
+    "puppeteer": "^24.4.0"
   }
 }
