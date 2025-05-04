@@ -492,39 +492,39 @@ app.post('/save-image', upload.single('file'), async (req, res) => {
 // CORS preflight for Anki proxy
 app.options('/anki-proxy', cors(corsOptions));
 
-// /**
-//  * Proxy seguro para AnkiConnect.
-//  * - El cuerpo debe traer: { action, version, params }
-//  * - La URL de AnkiConnect se pasa en un header custom 'x-anki-url'
-//  * - Valida que sea localhost o 127.0.0.1 para prevenir SSRF
-//  */
-app.post('/anki-proxy', async (req, res) => {
-  try {
-    const ankiUrl = req.get('x-anki-url');
-    if (!ankiUrl) return res.status(400).json({ error: 'Falta header x-anki-url' });
+// // /**
+// //  * Proxy seguro para AnkiConnect.
+// //  * - El cuerpo debe traer: { action, version, params }
+// //  * - La URL de AnkiConnect se pasa en un header custom 'x-anki-url'
+// //  * - Valida que sea localhost o 127.0.0.1 para prevenir SSRF
+// //  */
+// app.post('/anki-proxy', async (req, res) => {
+//   try {
+//     const ankiUrl = req.get('x-anki-url');
+//     if (!ankiUrl) return res.status(400).json({ error: 'Falta header x-anki-url' });
 
-    const { hostname, protocol, port } = new URL(ankiUrl);
-    if (!['http:','https:'].includes(protocol) ||
-        !['localhost','127.0.0.1'].includes(hostname) ||
-        (port && port !== '8765')) {
-      return res.status(400).json({ error: 'URL de AnkiConnect no permitida' });
-    }
+//     const { hostname, protocol, port } = new URL(ankiUrl);
+//     if (!['http:','https:'].includes(protocol) ||
+//         !['localhost','127.0.0.1'].includes(hostname) ||
+//         (port && port !== '8765')) {
+//       return res.status(400).json({ error: 'URL de AnkiConnect no permitida' });
+//     }
 
-    const response = await axios.post(
-      ankiUrl,
-      {
-        action:  req.body.action,
-        version: req.body.version,
-        params:  req.body.params || {}
-      },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-    res.json(response.data);
-  } catch (e) {
-    console.error('Error proxying to AnkiConnect:', e.message);
-    res.status(500).json({ error: e.toString() });
-  }
-});
+//     const response = await axios.post(
+//       ankiUrl,
+//       {
+//         action:  req.body.action,
+//         version: req.body.version,
+//         params:  req.body.params || {}
+//       },
+//       { headers: { 'Content-Type': 'application/json' } }
+//     );
+//     res.json(response.data);
+//   } catch (e) {
+//     console.error('Error proxying to AnkiConnect:', e.message);
+//     res.status(500).json({ error: e.toString() });
+//   }
+// });
 
 console.log('Attempting to listen on the port...');
 const PORT = process.env.PORT || 3001;

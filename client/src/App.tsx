@@ -287,7 +287,7 @@ function App() {
     }
   };
 
-  const proxyEndpoint = 'https://anki-app-2yx0.onrender.com/anki-proxy';
+  const proxyEndpoint = '';
 
   // Función para aprobar la tarjeta y enviarla directamente a AnkiConnect (con audio)
   const handleApprove = async (label: Label) => {
