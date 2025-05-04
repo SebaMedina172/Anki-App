@@ -329,7 +329,16 @@ function App() {
           filename: `${label.text.toLowerCase()}_word.mp3`,
           fields: ["Sound"]
         },
-        // ...Meaning, Example
+        {
+          url: getTTSUrl(label.meaning, selectedLanguage),
+          filename: `${label.text.toLowerCase()}_meaning.mp3`,
+          fields: ["Sound_Meaning"]
+        },
+        {
+          url: getTTSUrl(label.example, selectedLanguage),
+          filename: `${label.text.toLowerCase()}_example.mp3`,
+          fields: ["Sound_Example"]
+        }
       ];
 
       const note: any = {
