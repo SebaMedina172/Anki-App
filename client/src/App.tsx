@@ -278,8 +278,6 @@ function App() {
     }
   };
 
-  const proxyEndpoint = '';
-
   // Función para aprobar la tarjeta y enviarla directamente a AnkiConnect (con audio)
   const handleApprove = async (label: Label) => {
     setIsProcessing(true);
@@ -300,7 +298,7 @@ function App() {
       }
   
       if (filename) {
-        await fetch(proxyEndpoint, {
+        await fetch(ankiConnectUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -343,7 +341,7 @@ function App() {
         picture: filename ? [{ filename, fields: ["Image"] }] : []
       };
   
-      const addResp = await fetch(proxyEndpoint, {
+      const addResp = await fetch(ankiConnectUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
