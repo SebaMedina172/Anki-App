@@ -172,6 +172,17 @@ async function createAudio(text, filename) {
   });
 }
 
+// HELPER: guarda la imagen remota en MEDIA_PATH, devuelve el nombre del archivo
+async function saveImageToMedia(url, filename) {
+  const resp = await axios({ url, method: 'GET', responseType: 'stream' });
+  const filePath = path.join(MEDIA_PATH, filename);
+  const writer = fs.createWriteStream(filePath);
+  resp.data.pipe(writer);
+  return new Promise((resolve, reject) => {
+    writer.on('finish', () => resolve(filename));
+    writer.on('error', reject);
+  });
+}
 /**
  * Envía la tarjeta a Anki mediante AnkiConnect.
  */
@@ -339,27 +350,23 @@ app.get('/search', async (req, res) => {
 
 app.get('/search-image', async (req, res) => {
   const query = req.query.query;
-  if (!query) {
-    return res.status(400).json({ error: 'Missing query parameter' });
-  }
+  if (!query) return res.status(400).json({ error: 'Missing query parameter' });
   try {
     const apiKey = process.env.PIXABAY_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'PIXABAY_API_KEY no está definida' });
-    }
-    // Realiza la búsqueda en Pixabay
-    const response = await axios.get('https://pixabay.com/api/', {
-      params: {
-        key: apiKey,
-        q: query,
-        per_page: 5,
-        image_type: 'photo',
-        safesearch: true,
-      }
-    });
-    // Extraemos las URL de las imágenes; en Pixabay suelen estar en response.data.hits
-    const images = response.data.hits.map(hit => hit.webformatURL);
-    res.json({ images });
+    const resp = await axios.get('https://pixabay.com/api/', { 
+      params: { 
+        key: apiKey, 
+        q: query, 
+        per_page: 1, 
+        image_type: 'photo', 
+        safesearch: true, 
+        } 
+      });
+    const hit = resp.data.hits[0];
+    if (!hit) return res.status(404).json({ error: 'No image found' });
+    const filename = `${query.replace(/\W+/g, '_')}_${Date.now()}.jpg`;
+    await saveImageToMedia(hit.webformatURL, filename);
+    res.json({ filename });
   } catch (error) {
     console.error('Error en /search-image:', error.message);
     res.status(500).json({ error: error.toString() });
@@ -466,8 +473,11 @@ app.get('/search-image', async (req, res) => {
 //   }
 // });
 
+app.get('/search', async (req, res) => { /* existing code */ });
+app.get('/ping', (req, res) => res.json({ message: 'pong' }));
+
 console.log('Attempting to listen on the port...');
-const PORT = process.env.PORT || 3001;;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
