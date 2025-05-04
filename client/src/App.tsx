@@ -166,16 +166,8 @@ function App() {
   };
 
   // Función para buscar imágenes para una etiqueta específica
-  const fetchImageSuggestionsForLabel = async (
-    labelId: number,
-    word: string,
-    example: string,
-    meaning: string,
-    lang: string = 'en',
-    page: number = 1
-  ) => {
+  const fetchImageSuggestionsForLabel = async (labelId: number, word: string, example: string, meaning: string, lang = 'en', page = 1) => {
     try {
-      // 1) construye la query
       const baseText = example.toLowerCase().includes("example not found")
         ? extractKeywords(meaning, lang)
         : extractKeywords(example, lang);
@@ -209,33 +201,32 @@ function App() {
           }]
         };
       }
+      const suggestions: ImageSuggestion[] = data.images;
   
       // 6) actualiza el estado con objetos ImageSuggestion
       setLabels(prev =>
-        prev.map(label => {
-          if (label.id !== labelId) return label;
+      prev.map(lbl =>
+        lbl.id === labelId
+          ? {
+              ...lbl,
+              imageSuggestions: suggestions,       // guardo objetos
+              selectedImage: suggestions[0] || null,
+            }
+          : lbl
+      )
+    );
   
-          const suggestions: ImageSuggestion[] = data.images;
-          return {
-            ...label,
-            imageSuggestions: suggestions,
-            selectedImage: suggestions[0] || null,
-            refreshPage: page
-          };
-        })
-      );
-  
-    } catch (error) {
-      console.error('Error al buscar imágenes para label:', error);
-      // en caso de error limpiamos sugerencias
-      setLabels(prev =>
-        prev.map(label => label.id === labelId
-          ? { ...label, imageSuggestions: [], selectedImage: null, refreshPage: page }
-          : label
-        )
-      );
-    }
-  };
+  } catch (e) {
+    console.error('Error fetching images:', e);
+    setLabels(prev =>
+      prev.map(lbl =>
+        lbl.id === labelId
+          ? { ...lbl, imageSuggestions: [], selectedImage: null }
+          : lbl
+      )
+    );
+  }
+};
 
   // Función para buscar la palabra en el backend (GET /search)
   // Se mantiene igual ya que sigue llamando al backend para búsqueda en el diccionario
