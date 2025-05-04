@@ -22,9 +22,6 @@ app.options('/anki-proxy', cors());  // responde con 204 + cabeceras CORS
 
 require('dotenv').config();
 
-// Configuración de multer para manejar uploads
-const upload = multer({ dest: MEDIA_PATH });  // <--- Definición de upload
-
 // /**
 //  * Proxy seguro para AnkiConnect.
 //  * - El cuerpo debe traer: { action, version, params }
@@ -152,7 +149,8 @@ try {
     console.log('Se creó la carpeta fallback "media":', MEDIA_PATH);
   }
 }
-
+// Configuración de multer para manejar uploads
+const upload = multer({ dest: MEDIA_PATH });  // <--- Definición de upload
 const ANKI_CONNECT_URL = "http://localhost:8765";
 
 /**
