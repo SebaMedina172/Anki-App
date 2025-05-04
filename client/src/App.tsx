@@ -32,6 +32,11 @@ import * as stopword from 'stopword';
   },
 }} />
 
+interface ImageSuggestion {
+  previewURL: string;
+  fullURL: string;
+}
+
 interface Label {
   id: number;
   text: string;
@@ -39,8 +44,8 @@ interface Label {
   meaning: string;
   example: string;
   isEditing: boolean;
-  imageSuggestions?: string[];  // URLs sugeridas para esta etiqueta
-  selectedImage?: string | null; // URL de la imagen elegida para esta etiqueta
+  imageSuggestions: ImageSuggestion[];  // URLs sugeridas para esta etiqueta
+  selectedImage: ImageSuggestion | null; // URL de la imagen elegida para esta etiqueta
   refreshPage?: number;          // Página actual para la búsqueda de imágenes
 }
 
@@ -170,66 +175,63 @@ function App() {
     page: number = 1
   ) => {
     try {
-      // Primer intento: Usamos el ejemplo si es válido; de lo contrario, el significado.
+      // 1) construye la query
       const baseText = example.toLowerCase().includes("example not found")
         ? extractKeywords(meaning, lang)
         : extractKeywords(example, lang);
       let query = `${word} ${baseText}`.trim();
-      
-      // Generamos un parámetro aleatorio para forzar variabilidad
-      const randomParam = Math.random().toString(36).substring(2, 8);
-      let url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}&r=${randomParam}`;
-      
-      let response = await fetch(url);
-      let data = await response.json();
-      
-      // Segundo intento: Si no hay imágenes, usamos "icon"
-      if (data.error || !data.images || data.images.length === 0) {
-        query = `${word} icon`;
-        url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}&r=${Math.random().toString(36).substring(2, 8)}`;
-        response = await fetch(url);
-        data = await response.json();
+  
+      // helper para llamar al backend
+      const doFetch = async (q: string) => {
+        const randomParam = Math.random().toString(36).substring(2, 8);
+        const url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(q)}&page=${page}&r=${randomParam}`;
+        const resp = await fetch(url);
+        return resp.json();
+      };
+  
+      // 2) primer intento
+      let data = await doFetch(query);
+  
+      // 3) fallback a icon
+      if (data.error || !data.images?.length) {
+        data = await doFetch(`${word} icon`);
       }
-      
-      // Tercer intento: Si aún no hay, usamos "illustration"
-      if (data.error || !data.images || data.images.length === 0) {
-        query = `${word} illustration`;
-        url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(query)}&page=${page}&r=${Math.random().toString(36).substring(2, 8)}`;
-        response = await fetch(url);
-        data = await response.json();
+      // 4) fallback a illustration
+      if (data.error || !data.images?.length) {
+        data = await doFetch(`${word} illustration`);
       }
-      
-      // Fallback definitivo: Si nada retorna, usar un placeholder
-      if (data.error || !data.images || data.images.length === 0) {
-        const defaultImage = `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`;
-        data = { images: [defaultImage] };
+      // 5) fallback placeholder
+      if (data.error || !data.images?.length) {
+        data = {
+          images: [{
+            previewURL: `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`,
+            fullURL:   `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`
+          }]
+        };
       }
-      
-      // Actualizamos la etiqueta:
-      setLabels(prevLabels =>
-        prevLabels.map(label => {
-          if (label.id === labelId) {
-            // Si ya había sugerencias, filtramos las que ya aparecieron.
-            const prevImages = label.imageSuggestions || [];
-            // Filtramos las imágenes nuevas que ya no estén en prevImages.
-            const newImages = data.images.filter((img: string) => !prevImages.includes(img));
-            // Si newImages queda vacío, usamos data.images (la API pudo devolver resultados repetidos)
-            const finalImages = newImages.length > 0 ? newImages : data.images;
-            return {
-              ...label,
-              imageSuggestions: finalImages,
-              selectedImage: finalImages[0],
-              refreshPage: page,  // Guardamos la página actual
-            };
-          }
-          return label;
+  
+      // 6) actualiza el estado con objetos ImageSuggestion
+      setLabels(prev =>
+        prev.map(label => {
+          if (label.id !== labelId) return label;
+  
+          const suggestions: ImageSuggestion[] = data.images;
+          return {
+            ...label,
+            imageSuggestions: suggestions,
+            selectedImage: suggestions[0] || null,
+            refreshPage: page
+          };
         })
       );
+  
     } catch (error) {
       console.error('Error al buscar imágenes para label:', error);
-      setLabels(prevLabels =>
-        prevLabels.map(label =>
-          label.id === labelId ? { ...label, imageSuggestions: [], selectedImage: null } : label
+      // en caso de error limpiamos sugerencias
+      setLabels(prev =>
+        prev.map(label => label.id === labelId
+          ? { ...label, imageSuggestions: [], selectedImage: null, refreshPage: page }
+          : label
         )
       );
     }
@@ -681,7 +683,7 @@ const handleApprove = async (label: Label) => {
                 >
                   {label.selectedImage ? (
                     <img
-                      src={label.selectedImage}
+                      src={label.selectedImage.previewURL}
                       alt={label.text}
                       style={{ maxWidth: '100%', borderRadius: '4px' }}
                     />
@@ -760,7 +762,7 @@ const handleApprove = async (label: Label) => {
                 justifyContent: 'center',
                 zIndex: 1500,
               }}
-              onClick={() => setOpenImageModalLabelId(null)}
+              onClick={() => setOpenImageModalLabelId(null)} 
             >
               <Box
                 sx={(theme) => ({
@@ -792,15 +794,16 @@ const handleApprove = async (label: Label) => {
                   }}
                 >
                   {currentLabel.imageSuggestions && currentLabel.imageSuggestions.length > 0 ? (
-                    currentLabel.imageSuggestions.map((imgUrl, index) => (
+                    currentLabel.imageSuggestions.map((img, index) => (
                       <Box
                         key={index}
                         sx={{ cursor: 'pointer' }}
                         onClick={() => {
-                          setLabels((prevLabels) =>
-                            prevLabels.map((l) =>
+                          setLabels(prev =>
+                            prev.map(l =>
                               l.id === currentLabel.id
-                                ? { ...l, selectedImage: imgUrl }
+                                // guardamos el objeto completo img
+                                ? { ...l, selectedImage: img }
                                 : l
                             )
                           );
@@ -808,14 +811,19 @@ const handleApprove = async (label: Label) => {
                         }}
                       >
                         <img
-                          src={imgUrl}
-                          alt={`suggestion-${index}`}
-                          style={{
-                            width: '100%',
-                            borderRadius: '4px',
-                            border: currentLabel.selectedImage === imgUrl ? '2px solid blue' : 'none',
-                          }}
-                        />
+                        // mostramos previewURL
+                        src={img.previewURL}
+                        alt={`suggestion-${index}`}
+                        style={{
+                          width: '100%',
+                          borderRadius: '4px',
+                          // destacamos la seleccion
+                          border:
+                            currentLabel.selectedImage?.previewURL === img.previewURL
+                              ? '2px solid blue'
+                              : 'none',
+                        }}
+                      />
                       </Box>
                     ))
                   ) : (
@@ -841,15 +849,18 @@ const handleApprove = async (label: Label) => {
                         type="file"
                         accept="image/*"
                         style={{ display: 'none' }}
-                        onChange={(e) => {
+                        onChange={e => {
                           const file = e.target.files?.[0];
                           if (file) {
                             const reader = new FileReader();
-                            reader.onload = (event) => {
-                              setLabels((prevLabels) =>
-                                prevLabels.map((l) =>
+                            reader.onload = event => {
+                              // aquí guardamos un objeto con datos base64 en previewURL y fullURL
+                              const dataUrl = event.target?.result as string;
+                              const obj = { previewURL: dataUrl, fullURL: dataUrl };
+                              setLabels(prev =>
+                                prev.map(l =>
                                   l.id === currentLabel.id
-                                    ? { ...l, selectedImage: event.target?.result as string }
+                                    ? { ...l, selectedImage: obj }
                                     : l
                                 )
                               );
