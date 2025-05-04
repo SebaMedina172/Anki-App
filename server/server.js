@@ -10,7 +10,15 @@ const cors = require('cors');
 const ini = require('ini');
 const multer = require('multer');  // <--- Añadido multer
 
+const corsOptions = {
+  origin: 'https://anki-app.netlify.app',    // o '*' durante pruebas
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Content-Type','x-anki-url']
+};
+app.use(cors(corsOptions));
+
 const app = express();
+
 app.use(express.json());
 app.use(cors({
   origin: '*',
@@ -500,7 +508,6 @@ app.post('/save-image', upload.single('file'), async (req, res) => {
 //   }
 // });
 
-app.get('/search', async (req, res) => { /* existing code */ });
 app.get('/ping', (req, res) => res.json({ message: 'pong' }));
 
 console.log('Attempting to listen on the port...');
