@@ -8,6 +8,7 @@ const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
 const cors = require('cors');
 const ini = require('ini');
+const multer = require('multer');  // <--- Añadido multer
 
 const app = express();
 app.use(express.json());
@@ -20,6 +21,9 @@ app.get('/ping', (req, res) => res.json({ message: 'pong' }));
 app.options('/anki-proxy', cors());  // responde con 204 + cabeceras CORS
 
 require('dotenv').config();
+
+// Configuración de multer para manejar uploads
+const upload = multer({ dest: MEDIA_PATH });  // <--- Definición de upload
 
 // /**
 //  * Proxy seguro para AnkiConnect.
