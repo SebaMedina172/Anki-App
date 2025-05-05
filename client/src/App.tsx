@@ -347,7 +347,6 @@ function App() {
         fields,
         options: { allowDuplicate: false },
         audio,
-        picture: filename ? [{ filename, fields: ["Image"] }] : []
       };
   
       const addResp = await fetch(ankiConnectUrl, {
