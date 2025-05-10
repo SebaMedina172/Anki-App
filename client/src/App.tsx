@@ -26,6 +26,9 @@ import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { GlobalStyles } from '@mui/material';
 import * as stopword from 'stopword';
 
+// Importa el componente de ayuda
+import HelpGuide from './components/HelpGuide';
+
 <GlobalStyles styles={{
   body: {
     transition: 'background-color 0.3s ease, color 0.3s ease',
@@ -418,6 +421,8 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      {/* Botón de ayuda fijo */}
+    <HelpGuide />
       <Box
         sx={{
           display: 'flex',
