@@ -7,6 +7,9 @@ const path = require('path');
 const cors = require('cors');
 const ini = require('ini');
 const multer = require('multer');
+const cheerio   = require('cheerio');      // <— para getExampleFromLinguee
+const puppeteer = require('puppeteer');    // <— para getExampleFromTatoeba
+const googleTTS = require('google-tts-api');
 
 // Create Express app
 const app = express();

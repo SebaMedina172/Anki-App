@@ -11,6 +11,6 @@
     "google-tts-api": "^0.0.6",
     "ini": "^5.0.0",
     "multer": "^1.4.5-lts.2",
-    "puppeteer": "^24.4.0"
+    "puppeteer": "^24.9.0"
   }
 }
