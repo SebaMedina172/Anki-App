@@ -568,11 +568,16 @@ function isMetadataText(text) {
   const metadataPatterns = [
     /mw-parser-output/i,
     /\{\{.*\}\}/,
-    /^[A-Z][a-z]{0,3}\.?$/,  // Como "Sus.", "Adj."
+    /^[A-Z][a-z]{0,3}\.?$/,
     /Referencias/i,
     /Véase también/i,
     /Etimología/i,
-    /Pronunciación/i
+    /Pronunciación/i,
+    /Sinónimos?:/i,
+    /Antónimos?:/i,
+    /Ejemplos?:/i,
+    /^\s*\d+\.\s*$/, // Solo números
+    /^[•·-]\s*$/ // Solo viñetas
   ];
   
   return metadataPatterns.some(pattern => pattern.test(text));
@@ -674,13 +679,33 @@ function extractFromDL($, dlElement) {
  * Extrae texto de un elemento dd, manejando links y spans internos
  */
 function extractTextFromDD($, ddElement) {
-  // Primero intentar obtener el texto completo
-  let text = ddElement.text().trim();
+  console.log('          Extrayendo texto de dd...');
   
-  // Si está vacío o muy corto, intentar estrategias específicas
+  // Clonar el elemento para no modificar el original
+  const ddClone = ddElement.clone();
+  
+  // Remover todas las listas (ul, ol) que contienen sinónimos, antónimos, ejemplos, etc.
+  ddClone.find('ul, ol').remove();
+  
+  // También remover otros elementos que suelen contener información adicional
+  ddClone.find('.mw-collapsible').remove(); // Secciones colapsables
+  ddClone.find('.NavFrame').remove(); // Marcos de navegación
+  ddClone.find('.ejemplo').remove(); // Ejemplos específicos
+  ddClone.find('.sinonimos').remove(); // Sinónimos específicos
+  ddClone.find('.antonimos').remove(); // Antónimos específicos
+  
+  // Obtener el texto limpio
+  let text = ddClone.text().trim();
+  
+  // Si el texto resultante está vacío o muy corto, intentar estrategias alternativas
   if (!text || text.length < 3) {
-    // Buscar en spans internos
-    const spans = ddElement.find('span');
+    console.log('          Texto muy corto, intentando estrategias alternativas...');
+    
+    // Buscar en spans que no estén dentro de listas
+    const spans = ddElement.find('span').filter(function() {
+      return $(this).closest('ul, ol').length === 0;
+    });
+    
     for (let i = 0; i < spans.length; i++) {
       const spanText = spans.eq(i).text().trim();
       if (spanText && spanText.length > 3) {
@@ -689,21 +714,29 @@ function extractTextFromDD($, ddElement) {
       }
     }
     
-    // Si aún no hay texto, buscar en elementos a (links)
+    // Si aún no hay texto, buscar en elementos de texto directo (no en listas)
     if (!text || text.length < 3) {
-      const links = ddElement.find('a');
-      for (let i = 0; i < links.length; i++) {
-        const linkText = links.eq(i).text().trim();
-        if (linkText && linkText.length > 3) {
-          text = linkText;
-          break;
-        }
+      const directText = ddElement.contents().filter(function() {
+        return this.nodeType === 3 && // Nodo de texto
+               $(this).text().trim().length > 3;
+      }).first().text().trim();
+      
+      if (directText) {
+        text = directText;
       }
     }
   }
   
-  // Limpiar el texto
-  return cleanMeaningText(text);
+  // Limpiar el texto obtenido
+  const cleanedText = cleanMeaningText(text);
+  
+  if (cleanedText) {
+    console.log(`          ✓ Texto extraído (sin listas): "${cleanedText.substring(0, 50)}..."`);
+  } else {
+    console.log('          ✗ No se pudo extraer texto válido');
+  }
+  
+  return cleanedText;
 }
 
 
@@ -801,14 +834,39 @@ function cleanMeaningText(text) {
   // Limpiezas básicas
   text = text.trim();
   
-  // Remover patrones problemáticos específicos de Wiktionary
+  // Remover patrones específicos de información adicional
+  text = text.replace(/Sinónimos?:.*$/gi, ''); // Remover sinónimos al final
+  text = text.replace(/Antónimos?:.*$/gi, ''); // Remover antónimos al final
+  text = text.replace(/Ejemplos?:.*$/gi, ''); // Remover ejemplos al final
+  text = text.replace(/Véase también:.*$/gi, ''); // Remover "véase también"
+  text = text.replace(/Relacionados?:.*$/gi, ''); // Remover relacionados
+  
+  // Cortar en el primer indicador de información adicional
+  const cutOffPatterns = [
+    /\bSinónimos?\b/i,
+    /\bAntónimos?\b/i,
+    /\bEjemplos?\b/i,
+    /\bVéase también\b/i,
+    /\bRelacionados?\b/i,
+    /\bDerivados?\b/i,
+    /\bCompuestos?\b/i
+  ];
+  
+  for (const pattern of cutOffPatterns) {
+    const match = text.search(pattern);
+    if (match !== -1) {
+      text = text.substring(0, match).trim();
+      break;
+    }
+  }
+  
+  // Limpiezas generales (como ya tenías)
   text = text.replace(/\.mw-parser-output[^.]*\./g, '');
-  text = text.replace(/\{\{[^}]*\}\}/g, ''); // Remover templates de MediaWiki
-  text = text.replace(/\[[^\]]*\]/g, ''); // Remover referencias [1], [2], etc.
+  text = text.replace(/\{\{[^}]*\}\}/g, '');
+  text = text.replace(/\[[^\]]*\]/g, '');
   text = text.replace(/Sus\./g, '');
-  text = text.replace(/Ejemplo:[^.]*\./g, '');
-  text = text.replace(/\s+/g, ' '); // Normalizar espacios
-  text = text.replace(/^\d+\.?\s*/, ''); // Remover numeración al inicio
+  text = text.replace(/\s+/g, ' ');
+  text = text.replace(/^\d+\.?\s*/, '');
   
   // Limpiar caracteres extraños
   text = text.replace(/[^\w\sáéíóúüñÁÉÍÓÚÜÑ.,;:()¿?¡!-]/g, '');
