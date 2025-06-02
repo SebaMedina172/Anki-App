@@ -354,31 +354,23 @@ async function getExampleMultiSource(apiExample, word) {
 }
 
 /**
- * Versión mejorada que usa la API estándar de Wiktionary ES
- * Maneja mejor los errores y tiene fallback a diferentes endpoints
+ * Parser ultra robusto para Wiktionary ES
+ * Maneja múltiples formatos y estructuras inconsistentes
  */
 async function fetchWiktionaryEsRest(word) {
   try {
     console.log('Buscando palabra en Wiktionary ES:', word);
     
-    // Primero intentamos con la API de contenido normal
-    let url = `https://es.wiktionary.org/api/rest_v1/page/html/${encodeURIComponent(word)}`;
+    const url = `https://es.wiktionary.org/api/rest_v1/page/html/${encodeURIComponent(word)}`;
     console.log('URL de búsqueda:', url);
     
-    let response;
-    try {
-      response = await axios.get(url, {
-        headers: {
-          "User-Agent": "AnkiApp/1.0 (tu-email@dominio.com)",
-          "Accept": "text/html"
-        },
-        timeout: 10000
-      });
-    } catch (err) {
-      // Si falla la API REST, intentamos con web scraping directo
-      console.log('API REST falló, intentando web scraping directo...');
-      return await fetchWiktionaryEsWebScraping(word);
-    }
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent": "AnkiApp/1.0 (educational-purposes@example.com)",
+        "Accept": "text/html"
+      },
+      timeout: 15000
+    });
 
     if (!response.data) {
       console.log('No hay data en la respuesta');
@@ -388,91 +380,26 @@ async function fetchWiktionaryEsRest(word) {
     const $ = cheerio.load(response.data);
     console.log('HTML cargado correctamente');
 
-    // Extraer IPA
-    let ipa = null;
+    // ===== EXTRAER IPA =====
+    let ipa = extractIPA($);
     
-    // Buscar en diferentes posibles ubicaciones del IPA
-    const ipaSelectors = [
-      'table.pron-graf td',
-      '.IPA',
-      '.pronunciación',
-      'span[title*="AFI"]'
-    ];
+    // ===== EXTRAER SIGNIFICADO =====
+    let meaning = extractMeaning($, word);
     
-    for (const selector of ipaSelectors) {
-      const elements = $(selector);
-      elements.each((i, el) => {
-        const text = $(el).text().trim();
-        const match = text.match(/\[([^\]]+)\]/) || text.match(/\/([^\/]+)\//);
-        if (match) {
-          ipa = `/${match[1]}/`;
-          return false; // break
-        }
-      });
-      if (ipa) break;
-    }
-
-    // Extraer definición
-    let meaning = null;
-    
-    // Buscar secciones de definición
-    const definitionSections = [
-      'h3[id*="Sustantivo"]',
-      'h3[id*="Verbo"]',
-      'h3[id*="Adjetivo"]',
-      'h3[id*="Adverbio"]'
-    ];
-    
-    for (const sectionSelector of definitionSections) {
-      const section = $(sectionSelector).first();
-      if (section.length) {
-        // Buscar la definición después de la sección
-        const nextElements = section.nextAll();
-        
-        // Intentar encontrar en <dl><dd>, <ol><li>, o <p>
-        const definitionElement = nextElements.filter('dl').first().find('dd').first();
-        if (definitionElement.length) {
-          meaning = definitionElement.text().trim();
-          break;
-        }
-        
-        const listElement = nextElements.filter('ol').first().find('li').first();
-        if (listElement.length) {
-          meaning = listElement.text().trim();
-          break;
-        }
-        
-        const paragraphElement = nextElements.filter('p').first();
-        if (paragraphElement.length) {
-          meaning = paragraphElement.text().trim();
-          break;
-        }
-      }
-    }
-
-    // Extraer ejemplo
-    let example = "Example not found";
-    if (meaning) {
-      // Buscar ejemplos en elementos <ul><li> cercanos a la definición
-      const exampleElement = $('ul li').filter((i, el) => {
-        const text = $(el).text().toLowerCase();
-        return text.includes(word.toLowerCase()) && text.length > word.length + 10;
-      }).first();
-      
-      if (exampleElement.length) {
-        example = exampleElement.text().trim();
-      }
-    }
-
-    console.log('Resultado extraído:', { ipa, meaning: meaning?.substring(0, 50), example: example?.substring(0, 50) });
+    console.log('Resultado extraído:', { 
+      ipa, 
+      meaning: meaning?.substring(0, 100) + (meaning?.length > 100 ? '...' : ''),
+      meaningLength: meaning?.length
+    });
 
     if (!meaning && !ipa) {
+      console.log('No se encontró ni significado ni IPA');
       return null;
     }
 
     return {
       meaning: meaning || null,
-      example,
+      example: "Example not found", // Por ahora no extraemos ejemplos de Wiktionary
       ipa: ipa || null
     };
 
@@ -480,83 +407,280 @@ async function fetchWiktionaryEsRest(word) {
     console.error("Error en fetchWiktionaryEsRest:", err.message);
     if (err.response) {
       console.error("Status:", err.response.status);
-      console.error("Headers:", err.response.headers);
     }
     return null;
   }
 }
 
 /**
- * Fallback: Web scraping directo a la página de Wiktionary
+ * Extrae IPA de múltiples ubicaciones posibles
  */
-async function fetchWiktionaryEsWebScraping(word) {
-  try {
-    console.log('Intentando web scraping directo para:', word);
+function extractIPA($) {
+  console.log('Extrayendo IPA...');
+  
+  // Lista de selectores para buscar IPA, ordenados por prioridad
+  const ipaSelectors = [
+    // Tablas de pronunciación
+    'table.pron-graf td',
+    'table.wikitable td',
+    '.pronunciación td',
     
-    const url = `https://es.wiktionary.org/wiki/${encodeURIComponent(word)}`;
-    const response = await axios.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      },
-      timeout: 10000
-    });
-
-    const $ = cheerio.load(response.data);
+    // Spans y elementos específicos
+    '.IPA',
+    'span[title*="AFI"]',
+    'span[title*="IPA"]',
     
-    // Extraer IPA de la tabla de pronunciación
-    let ipa = null;
-    $('.wikitable tr').each((i, row) => {
-      const cells = $(row).find('td');
-      if (cells.length >= 2) {
-        const firstCell = $(cells[0]).text().trim();
-        const secondCell = $(cells[1]).text().trim();
+    // Búsqueda más amplia
+    'td:contains("/")',
+    'span:contains("/")',
+    
+    // Último recurso: buscar en cualquier elemento que contenga corchetes
+    '*:contains("[")'
+  ];
+  
+  for (const selector of ipaSelectors) {
+    try {
+      const elements = $(selector);
+      
+      for (let i = 0; i < elements.length; i++) {
+        const element = elements.eq(i);
+        const text = element.text().trim();
         
-        if (firstCell.includes('AFI') || firstCell.includes('IPA')) {
-          const match = secondCell.match(/\[([^\]]+)\]/);
+        // Buscar patrones de IPA
+        const ipaPatterns = [
+          /\[([^\]]+)\]/,     // [ˈbos]
+          /\/([^\/]+)\//,     // /ˈbos/
+          /ˈ[^,\s]+/,         // ˈbos (sin delimitadores)
+        ];
+        
+        for (const pattern of ipaPatterns) {
+          const match = text.match(pattern);
           if (match) {
-            ipa = `/${match[1]}/`;
+            let ipaText = match[1] || match[0];
+            
+            // Limpieza del IPA
+            ipaText = ipaText.replace(/^ˈ?/, ''); // remover acento inicial si está solo
+            
+            // Validar que parece IPA (contiene símbolos fonéticos)
+            if (/[ˈˌəɪʊɛɔaeiouθðʃʒtʃdʒŋɲɾrɣβ]/.test(ipaText)) {
+              console.log(`IPA encontrado con selector "${selector}": /${ipaText}/`);
+              return `/${ipaText}/`;
+            }
           }
         }
       }
-    });
-    
-    // Extraer definición
-    let meaning = null;
-    const meaningSelectors = [
-      '#Sustantivo_masculino',
-      '#Sustantivo_femenino', 
-      '#Verbo',
-      '#Adjetivo'
-    ];
-    
-    for (const selector of meaningSelectors) {
-      const header = $(selector);
-      if (header.length) {
-        let nextElement = header.parent().next();
-        while (nextElement.length && !meaning) {
-          if (nextElement.is('dl')) {
-            meaning = nextElement.find('dd').first().text().trim();
-            break;
-          } else if (nextElement.is('ol')) {
-            meaning = nextElement.find('li').first().text().trim();
-            break;
-          }
-          nextElement = nextElement.next();
+    } catch (e) {
+      console.log(`Error con selector IPA "${selector}":`, e.message);
+    }
+  }
+  
+  console.log('No se encontró IPA');
+  return null;
+}
+
+/**
+ * Extrae significado de manera muy flexible
+ */
+function extractMeaning($, word) {
+  console.log('Extrayendo significado...');
+  
+  // Lista de posibles headers de sección (h2, h3, h4, h5)
+  const sectionHeaders = [
+    // Sustantivos
+    'h2[id*="Sustantivo"], h3[id*="Sustantivo"], h4[id*="Sustantivo"], h5[id*="Sustantivo"]',
+    // Verbos
+    'h2[id*="Verbo"], h3[id*="Verbo"], h4[id*="Verbo"], h5[id*="Verbo"]',
+    // Adjetivos
+    'h2[id*="Adjetivo"], h3[id*="Adjetivo"], h4[id*="Adjetivo"], h5[id*="Adjetivo"]',
+    // Pronombres
+    'h2[id*="Pronombre"], h3[id*="Pronombre"], h4[id*="Pronombre"], h5[id*="Pronombre"]',
+    // Adverbios
+    'h2[id*="Adverbio"], h3[id*="Adverbio"], h4[id*="Adverbio"], h5[id*="Adverbio"]',
+    // Interjecciones
+    'h2[id*="Interjección"], h3[id*="Interjección"], h4[id*="Interjección"], h5[id*="Interjección"]',
+    // Preposiciones
+    'h2[id*="Preposición"], h3[id*="Preposición"], h4[id*="Preposición"], h5[id*="Preposición"]',
+    // Conjunciones
+    'h2[id*="Conjunción"], h3[id*="Conjunción"], h4[id*="Conjunción"], h5[id*="Conjunción"]'
+  ];
+  
+  // Intentar cada tipo de sección
+  for (const headerSelector of sectionHeaders) {
+    try {
+      const headers = $(headerSelector);
+      console.log(`Probando selector: ${headerSelector}, encontrados: ${headers.length}`);
+      
+      for (let i = 0; i < headers.length; i++) {
+        const header = headers.eq(i);
+        const headerText = header.text().trim();
+        console.log(`  Analizando header: "${headerText}"`);
+        
+        const meaning = extractMeaningFromSection($, header);
+        if (meaning && meaning.length > 3) { // Al menos 3 caracteres
+          console.log(`  Significado encontrado: "${meaning.substring(0, 50)}..."`);
+          return meaning;
         }
-        if (meaning) break;
+      }
+    } catch (e) {
+      console.log(`Error con selector de header "${headerSelector}":`, e.message);
+    }
+  }
+  
+  // Si no encontramos nada con headers específicos, búsqueda más amplia
+  console.log('Búsqueda amplia de definiciones...');
+  return extractMeaningBroadSearch($);
+}
+
+/**
+ * Extrae significado de una sección específica
+ */
+function extractMeaningFromSection($, header) {
+  // Buscar en los siguientes elementos después del header
+  let current = header.next();
+  let attempts = 0;
+  
+  while (current.length && attempts < 10) {
+    attempts++;
+    
+    // Buscar en listas de definición
+    if (current.is('dl')) {
+      const dd = current.find('dd').first();
+      if (dd.length) {
+        const text = cleanMeaningText(dd.text());
+        if (text && text.length > 3) return text;
       }
     }
     
-    return {
-      meaning: meaning || null,
-      example: "Example not found",
-      ipa: ipa || null
-    };
+    // Buscar en listas ordenadas/no ordenadas
+    if (current.is('ol, ul')) {
+      const li = current.find('li').first();
+      if (li.length) {
+        const text = cleanMeaningText(li.text());
+        if (text && text.length > 3) return text;
+      }
+    }
     
-  } catch (err) {
-    console.error("Error en web scraping:", err.message);
+    // Buscar en párrafos
+    if (current.is('p')) {
+      const text = cleanMeaningText(current.text());
+      if (text && text.length > 3) return text;
+    }
+    
+    // Buscar dentro de divs
+    if (current.is('div')) {
+      const dd = current.find('dd').first();
+      if (dd.length) {
+        const text = cleanMeaningText(dd.text());
+        if (text && text.length > 3) return text;
+      }
+      
+      const li = current.find('li').first();
+      if (li.length) {
+        const text = cleanMeaningText(li.text());
+        if (text && text.length > 3) return text;
+      }
+    }
+    
+    current = current.next();
+  }
+  
+  return null;
+}
+
+/**
+ * Búsqueda amplia cuando no se encuentra con headers específicos
+ */
+function extractMeaningBroadSearch($) {
+  // Buscar cualquier <dd> que contenga texto sustancial
+  const allDDs = $('dd');
+  for (let i = 0; i < allDDs.length; i++) {
+    const dd = allDDs.eq(i);
+    const text = cleanMeaningText(dd.text());
+    if (text && text.length > 10 && !text.includes('mw-parser-output')) {
+      console.log(`Definición encontrada en búsqueda amplia: "${text.substring(0, 50)}..."`);
+      return text;
+    }
+  }
+  
+  // Buscar en <li> elementos
+  const allLIs = $('li');
+  for (let i = 0; i < allLIs.length; i++) {
+    const li = allLIs.eq(i);
+    const text = cleanMeaningText(li.text());
+    if (text && text.length > 10 && !text.includes('mw-parser-output')) {
+      console.log(`Definición encontrada en <li>: "${text.substring(0, 50)}..."`);
+      return text;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Limpia el texto del significado
+ */
+function cleanMeaningText(text) {
+  if (!text) return null;
+  
+  // Limpiezas básicas
+  text = text.trim();
+  
+  // Remover patrones problemáticos
+  text = text.replace(/\.mw-parser-output[^.]*\./g, '');
+  text = text.replace(/Sus\./g, ''); // "Sus." no es una definición útil
+  text = text.replace(/Ejemplo:[^.]*\./g, '');
+  text = text.replace(/\s+/g, ' ');
+  
+  // Si es muy corto o contiene patrones problemáticos, descartarlo
+  if (text.length < 3 || 
+      text.includes('mw-parser-output') || 
+      text.includes('blockquote') ||
+      /^[A-Z][a-z]{0,2}\.?$/.test(text)) { // Como "Sus."
     return null;
   }
+  
+  return text.trim();
+}
+
+/**
+ * API alternativa para ejemplos en español - usando Tatoeba
+ */
+async function getExampleSpanish(word) {
+  try {
+    console.log(`Buscando ejemplo en español para: ${word}`);
+    
+    // Usar Tatoeba para español
+    const url = `https://tatoeba.org/en/sentences/search?query=${encodeURIComponent(word)}&from=spa&to=spa`;
+    
+    const browser = await puppeteer.launch({ 
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 10000 });
+    
+    const sentences = await page.$$eval('div.sentence div.text', elements =>
+      elements.map(el => el.textContent.trim())
+    );
+    
+    await browser.close();
+    
+    // Buscar una oración que contenga la palabra y sea de buena longitud
+    for (let sentence of sentences) {
+      if (sentence.toLowerCase().includes(word.toLowerCase()) && 
+          sentence.split(' ').length >= 4 && 
+          sentence.split(' ').length <= 20) {
+        console.log(`Ejemplo encontrado: ${sentence}`);
+        return sentence;
+      }
+    }
+    
+  } catch (error) {
+    console.error("Error obteniendo ejemplo en español:", error.message);
+  }
+  
+  return "Ejemplo no encontrado";
 }
 
 /**
@@ -566,13 +690,12 @@ console.log('Defining routes...');
 app.get("/search", async (req, res) => {
   console.log('=== INICIO DE BÚSQUEDA ===');
   
-  // 1) Leer parámetros
   const rawWord = (req.query.word || "").trim();
   const lang = (req.query.lang || "en").trim().toLowerCase();
   
   console.log(`Parámetros recibidos: word="${rawWord}", lang="${lang}"`);
 
-  // 2) Validaciones básicas
+  // Validaciones básicas
   if (!rawWord) {
     return res.status(400).json({ error: "Falta el parámetro 'word'" });
   }
@@ -583,7 +706,7 @@ app.get("/search", async (req, res) => {
     });
   }
 
-  // 3) Validación específica del idioma
+  // Validación específica del idioma
   const validation = validateWordForLanguage(rawWord, lang);
   if (!validation.valid) {
     return res.status(400).json({ error: validation.reason });
@@ -592,7 +715,7 @@ app.get("/search", async (req, res) => {
   try {
     console.log(`Procesando búsqueda para "${rawWord}" en idioma "${lang}"`);
 
-    // 4A) Procesamiento para inglés
+    // INGLÉS - Sin cambios
     if (lang === "en") {
       console.log('Buscando en diccionario de inglés...');
       
@@ -615,7 +738,7 @@ app.get("/search", async (req, res) => {
         meaning: parsedEn.meaning?.substring(0, 50) 
       });
 
-      // Obtener ejemplo de múltiples fuentes
+      // Obtener ejemplo de múltiples fuentes (como antes)
       let exampleEn = await getExampleMultiSource(parsedEn.example, rawWord);
       if (!exampleEn) exampleEn = "Example not found";
 
@@ -629,7 +752,7 @@ app.get("/search", async (req, res) => {
       });
     }
 
-    // 4B) Procesamiento para español
+    // ESPAÑOL - Mejorado
     if (lang === "es") {
       console.log('Buscando en Wiktionary español...');
       
@@ -647,12 +770,21 @@ app.get("/search", async (req, res) => {
         meaning: dataEs.meaning?.substring(0, 50) 
       });
 
+      // Para ejemplos en español, usar Tatoeba específicamente
+      let exampleEs = "Ejemplo no encontrado";
+      try {
+        console.log('Buscando ejemplo en español...');
+        exampleEs = await getExampleSpanish(rawWord);
+      } catch (error) {
+        console.error('Error obteniendo ejemplo en español:', error.message);
+      }
+
       console.log('=== BÚSQUEDA COMPLETADA (ES) ===');
       return res.json({
         word: rawWord.toLowerCase(),
         ipa: dataEs.ipa || "",
         meaning: dataEs.meaning || "",
-        example: dataEs.example || "Example not found",
+        example: exampleEs,
         language: "es"
       });
     }
