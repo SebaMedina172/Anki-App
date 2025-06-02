@@ -880,44 +880,253 @@ function cleanMeaningText(text) {
 }
 
 /**
- * API alternativa para ejemplos en español - usando Tatoeba
+ * Función mejorada para obtener ejemplos en español con múltiples intentos
+ */
+async function getExampleSpanishImproved(word) {
+  try {
+    console.log(`=== Iniciando búsqueda de ejemplo para: ${word} ===`);
+    
+    // Intentar obtener ejemplo de las fuentes principales
+    let example = await getExampleSpanish(word);
+    
+    // Si no se encontró ejemplo, usar función de respaldo
+    if (!example || example === "Ejemplo no encontrado") {
+      console.log(`No se encontró ejemplo en fuentes externas, creando ejemplo simple para: ${word}`);
+      example = createSimpleExample(word);
+    }
+    
+    console.log(`=== Ejemplo final para ${word}: ${example} ===`);
+    return example;
+    
+  } catch (error) {
+    console.error('Error en getExampleSpanishImproved:', error.message);
+    return createSimpleExample(word);
+  }
+}
+
+/**
+ * API alternativa para ejemplos en español - usando múltiples fuentes
  */
 async function getExampleSpanish(word) {
+  console.log(`Buscando ejemplo en español para: ${word}`);
+  
+  // Intentar múltiples fuentes en orden de prioridad
+  const sources = [
+    () => getExampleFromTatoebaApi(word),
+    () => getExampleFromTatoebaScraping(word),
+    () => getExampleFromSpanishDict(word),
+    () => getExampleFromLingueeSpanish(word)
+  ];
+  
+  for (const getExample of sources) {
+    try {
+      const example = await getExample();
+      if (example && example !== "Ejemplo no encontrado") {
+        console.log(`Ejemplo encontrado: ${example}`);
+        return example;
+      }
+    } catch (error) {
+      console.log(`Error en una fuente de ejemplos: ${error.message}`);
+      continue;
+    }
+  }
+  
+  return "Ejemplo no encontrado";
+}
+
+/**
+ * Obtener ejemplos de Tatoeba usando su API directa (más confiable)
+ */
+async function getExampleFromTatoebaApi(word) {
   try {
-    console.log(`Buscando ejemplo en español para: ${word}`);
+    console.log(`Intentando API de Tatoeba para: ${word}`);
     
-    // Usar Tatoeba para español
-    const url = `https://tatoeba.org/en/sentences/search?query=${encodeURIComponent(word)}&from=spa&to=spa`;
+    // Usar la API de búsqueda de Tatoeba
+    const searchUrl = `https://tatoeba.org/en/api_v0/search?from=spa&to=spa&query=${encodeURIComponent(word)}`;
     
-    const browser = await puppeteer.launch({ 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    const response = await axios.get(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json'
+      },
+      timeout: 10000
     });
     
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 10000 });
-    
-    const sentences = await page.$$eval('div.sentence div.text', elements =>
-      elements.map(el => el.textContent.trim())
-    );
-    
-    await browser.close();
-    
-    // Buscar una oración que contenga la palabra y sea de buena longitud
-    for (let sentence of sentences) {
-      if (sentence.toLowerCase().includes(word.toLowerCase()) && 
-          sentence.split(' ').length >= 4 && 
-          sentence.split(' ').length <= 20) {
-        console.log(`Ejemplo encontrado: ${sentence}`);
-        return sentence;
+    if (response.data && response.data.results) {
+      for (const result of response.data.results) {
+        if (result.text && 
+            result.text.toLowerCase().includes(word.toLowerCase()) && 
+            result.text.split(' ').length >= 4 && 
+            result.text.split(' ').length <= 20) {
+          return result.text.trim();
+        }
       }
     }
     
   } catch (error) {
-    console.error("Error obteniendo ejemplo en español:", error.message);
+    console.log("Error en API de Tatoeba:", error.message);
   }
   
-  return "Ejemplo no encontrado";
+  return null;
+}
+
+/**
+ * Scraping de Tatoeba usando Cheerio (sin Puppeteer)
+ */
+async function getExampleFromTatoebaScraping(word) {
+  try {
+    console.log(`Intentando scraping de Tatoeba para: ${word}`);
+    
+    const url = `https://tatoeba.org/en/sentences/search?query=${encodeURIComponent(word)}&from=spa&to=spa`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      },
+      timeout: 15000
+    });
+    
+    const $ = cheerio.load(response.data);
+    
+    // Buscar diferentes selectores posibles para las oraciones
+    const selectors = [
+      '.sentence .text',
+      '.sentence-text',
+      '.text',
+      '[data-sentence-text]',
+      '.sentence div:not(.meta)'
+    ];
+    
+    for (const selector of selectors) {
+      const sentences = $(selector);
+      
+      for (let i = 0; i < sentences.length; i++) {
+        const sentence = sentences.eq(i).text().trim();
+        
+        if (sentence && 
+            sentence.toLowerCase().includes(word.toLowerCase()) && 
+            sentence.split(' ').length >= 4 && 
+            sentence.split(' ').length <= 20 &&
+            !sentence.includes('http') &&
+            !sentence.includes('@')) {
+          return sentence;
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.log("Error en scraping de Tatoeba:", error.message);
+  }
+  
+  return null;
+}
+
+/**
+ * Obtener ejemplos de SpanishDict
+ */
+async function getExampleFromSpanishDict(word) {
+  try {
+    console.log(`Intentando SpanishDict para: ${word}`);
+    
+    const url = `https://www.spanishdict.com/translate/${encodeURIComponent(word)}`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      timeout: 10000
+    });
+    
+    const $ = cheerio.load(response.data);
+    
+    // Buscar ejemplos en SpanishDict
+    const exampleSelectors = [
+      '.example .text',
+      '.example-sentence',
+      '.example p',
+      '.examples .text'
+    ];
+    
+    for (const selector of exampleSelectors) {
+      const examples = $(selector);
+      
+      for (let i = 0; i < examples.length; i++) {
+        const example = examples.eq(i).text().trim();
+        
+        if (example && 
+            example.toLowerCase().includes(word.toLowerCase()) && 
+            example.split(' ').length >= 4 && 
+            example.split(' ').length <= 25) {
+          // Limpiar el ejemplo
+          const cleanExample = example.replace(/[""'']/g, '"').trim();
+          return cleanExample;
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.log("Error en SpanishDict:", error.message);
+  }
+  
+  return null;
+}
+
+/**
+ * Obtener ejemplos de Linguee para español
+ */
+async function getExampleFromLingueeSpanish(word) {
+  try {
+    console.log(`Intentando Linguee español para: ${word}`);
+    
+    const url = `https://www.linguee.com/spanish-english/search?source=auto&query=${encodeURIComponent(word)}`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      timeout: 10000
+    });
+    
+    const $ = cheerio.load(response.data);
+    
+    // Buscar ejemplos en Linguee
+    const exampleDivs = $(".example_lines .line");
+    
+    exampleDivs.each((i, el) => {
+      const text = $(el).text().trim();
+      if (text && 
+          text.split(' ').length >= 4 && 
+          text.toLowerCase().includes(word.toLowerCase()) &&
+          !text.includes('http')) {
+        return text;
+      }
+    });
+    
+  } catch (error) {
+    console.log("Error en Linguee español:", error.message);
+  }
+  
+  return null;
+}
+
+/**
+ * Función de respaldo - crear ejemplo simple con la palabra
+ */
+function createSimpleExample(word) {
+  const templates = [
+    `La palabra "${word}" es importante.`,
+    `Necesito usar "${word}" en mi trabajo.`,
+    `¿Conoces el significado de "${word}"?`,
+    `La definición de "${word}" es clara.`,
+    `El término "${word}" se usa frecuentemente.`
+  ];
+  
+  return templates[Math.floor(Math.random() * templates.length)];
 }
 
 /**
@@ -1011,7 +1220,7 @@ app.get("/search", async (req, res) => {
       let exampleEs = "Ejemplo no encontrado";
       try {
         console.log('Buscando ejemplo en español...');
-        exampleEs = await getExampleSpanish(rawWord);
+        exampleEs = await getExampleSpanishImproved(rawWord);
       } catch (error) {
         console.error('Error obteniendo ejemplo en español:', error.message);
       }
@@ -1083,142 +1292,8 @@ app.post('/save-image', upload.single('file'), async (req, res) => {
   }
 });
 
-// async function noteExists(deck, model, normalizedWord, ankiConnectUrl) {
-//   // Este ejemplo asume que el campo 'Word' es el que se verifica.
-//   const query = `deck:"${deck}" note:"${model}" Word:"${normalizedWord}"`;
-//   const payload = { action: 'findNotes', version: 6, params: { query } };
-//   try {
-//     const response = await axios.post(ankiConnectUrl, payload, {
-//       headers: { 'Content-Type': 'application/json' }
-//     });
-//     // Si se encontraron notas, retorna true
-//     return response.data.result && response.data.result.length > 0;
-//   } catch (error) {
-//     console.error("Error al buscar nota:", error.message);
-//     return false;
-//   }
-// }
-
-// /**
-//  * Endpoint para crear la tarjeta en Anki.
-//  */
-// app.post('/create-card', async (req, res) => {
-//   try {
-//     const { deck, model, ankiConnectUrl, word, ipa, meaning, example } = req.body;
-//     if (!deck || !model || !ankiConnectUrl || !word || !ipa || !meaning || !example) {
-//       return res.status(400).json({ error: 'Missing required fields' });
-//     }
-
-//     const normalizedWord = word.trim().toLowerCase();
-
-//     // Verificar si ya existe la nota
-//     const exists = await noteExists(deck, model, normalizedWord, ankiConnectUrl);
-//     if (exists) {
-//       return res.status(400).json({ error: 'La palabra ya existe en el deck.' });
-//     }
-
-//     const audioWordFilename = `${normalizedWord}_pronunciation.mp3`;
-//     const audioMeaningFilename = `${normalizedWord}_definition.mp3`;
-//     const audioExampleFilename = `${normalizedWord}_example.mp3`;
-
-//     await createAudio(word, audioWordFilename);
-//     await createAudio(meaning, audioMeaningFilename);
-//     await createAudio(example, audioExampleFilename);
-
-//     const fields = {
-//       Word: normalizedWord,
-//       Sound: `[sound:${audioWordFilename}]`,
-//       IPA: ipa.trim(),
-//       Meaning: meaning.trim(),
-//       Example: example.trim(),
-//       Sound_Meaning: `[sound:${audioMeaningFilename}]`,
-//       Sound_Example: `[sound:${audioExampleFilename}]`
-//     };
-
-//     const result = await addCardToAnki(deck, model, fields, ankiConnectUrl);
-//     res.json(result);
-//   } catch (error) {
-//     console.error('Error en /create-card:', error.message);
-//     res.status(500).json({ error: error.toString() });
-//   }
-// });
-
-// // Endpoint para obtener los decks desde AnkiConnect
-// app.post('/anki/decks', async (req, res) => {
-//   const { ankiConnectUrl } = req.body;
-//   if (!ankiConnectUrl) {
-//     return res.status(400).json({ error: 'Falta ankiConnectUrl' });
-//   }
-//   try {
-//     const deckResponse = await axios.post(ankiConnectUrl, {
-//       action: 'deckNames',
-//       version: 6,
-//     }, {
-//       headers: { 'Content-Type': 'application/json' }
-//     });
-//     res.json(deckResponse.data);
-//   } catch (error) {
-//     console.error('Error al obtener decks:', error.message);
-//     res.status(500).json({ error: error.toString() });
-//   }
-// });
-
-// // Endpoint para obtener los modelos desde AnkiConnect
-// app.post('/anki/models', async (req, res) => {
-//   const { ankiConnectUrl } = req.body;
-//   if (!ankiConnectUrl) {
-//     return res.status(400).json({ error: 'Falta ankiConnectUrl' });
-//   }
-//   try {
-//     const modelResponse = await axios.post(ankiConnectUrl, {
-//       action: 'modelNames',
-//       version: 6,
-//     }, {
-//       headers: { 'Content-Type': 'application/json' }
-//     });
-//     res.json(modelResponse.data);
-//   } catch (error) {
-//     console.error('Error al obtener modelos:', error.message);
-//     res.status(500).json({ error: error.toString() });
-//   }
-// });
-
 // CORS preflight for Anki proxy
 app.options('/anki-proxy', cors(corsOptions));
-
-// // /**
-// //  * Proxy seguro para AnkiConnect.
-// //  * - El cuerpo debe traer: { action, version, params }
-// //  * - La URL de AnkiConnect se pasa en un header custom 'x-anki-url'
-// //  * - Valida que sea localhost o 127.0.0.1 para prevenir SSRF
-// //  */
-// app.post('/anki-proxy', async (req, res) => {
-//   try {
-//     const ankiUrl = req.get('x-anki-url');
-//     if (!ankiUrl) return res.status(400).json({ error: 'Falta header x-anki-url' });
-
-//     const { hostname, protocol, port } = new URL(ankiUrl);
-//     if (!['http:','https:'].includes(protocol) ||
-//         !['localhost','127.0.0.1'].includes(hostname) ||
-//         (port && port !== '8765')) {
-//       return res.status(400).json({ error: 'URL de AnkiConnect no permitida' });
-//     }
-
-//     const response = await axios.post(
-//       ankiUrl,
-//       {
-//         action:  req.body.action,
-//         version: req.body.version,
-//         params:  req.body.params || {}
-//       },
-//       { headers: { 'Content-Type': 'application/json' } }
-//     );
-//     res.json(response.data);
-//   } catch (e) {
-//     console.error('Error proxying to AnkiConnect:', e.message);
-//     res.status(500).json({ error: e.toString() });
-//   }
-// });
 
 console.log('Attempting to listen on the port...');
 const PORT = process.env.PORT || 3001;
