@@ -15,9 +15,41 @@ const googleTTS = require('google-tts-api');
 //  Regex mínimos para validar “word” según idioma
 // ============================================
 const regexByLang = {
-  en: /^[A-Za-z'-]+$/,                             // sólo letras A-Z o apóstrofe/guión
-  es: /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+$/                 // incluye vocales acentuadas y ñ
+  en: /^[A-Za-z][A-Za-z'\-\s]*[A-Za-z]$|^[A-Za-z]$/,  // Permite espacios para frases cortas
+  es: /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ'\-\s]*[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$|^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/
 };
+
+// Palabras comunes para detectar si una palabra podría pertenecer al idioma incorrecto
+const commonWords = {
+  en: ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'],
+  es: ['el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'en', 'con', 'por', 'para', 'que', 'es', 'son']
+};
+
+/**
+ * Valida si una palabra es apropiada para el idioma seleccionado
+ */
+function validateWordForLanguage(word, lang) {
+  // Validación básica con regex
+  if (!regexByLang[lang].test(word)) {
+    return {
+      valid: false,
+      reason: `La palabra '${word}' contiene caracteres no válidos para ${lang === 'en' ? 'inglés' : 'español'}`
+    };
+  }
+  
+  // Detección cruzada: verificar si la palabra es claramente del otro idioma
+  const otherLang = lang === 'en' ? 'es' : 'en';
+  const wordLower = word.toLowerCase();
+  
+  if (commonWords[otherLang].includes(wordLower)) {
+    return {
+      valid: false,
+      reason: `La palabra '${word}' parece ser del idioma ${otherLang === 'en' ? 'inglés' : 'español'}, pero tienes seleccionado ${lang === 'en' ? 'inglés' : 'español'}`
+    };
+  }
+  
+  return { valid: true };
+}
 
 // Create Express app
 const app = express();
@@ -322,129 +354,207 @@ async function getExampleMultiSource(apiExample, word) {
 }
 
 /**
- * Usa la REST API “mobile-html” de Wiktionary ES para extraer:
- *   • IPA (tabla .pron-graf)
- *   • Primera definición (sección “Sustantivo_masculino” o “Verbo” según corresponda)
- *   • Primer ejemplo anidado (si existe dentro de <ul><li> en la definición)
- *
- * Si la palabra no existe (404) o no se logra extraer, devuelve null.
+ * Versión mejorada que usa la API estándar de Wiktionary ES
+ * Maneja mejor los errores y tiene fallback a diferentes endpoints
  */
 async function fetchWiktionaryEsRest(word) {
   try {
-    // 1) Llamamos a mobile-html en Wiktionary ES
-    console.log("This is the encodeURIComponent word:", encodeURIComponent(word))
-    const url = `https://es.wiktionary.org/api/rest_v1/page/mobile-html/${encodeURIComponent(
-      word
-    )}`;
-    const response = await axios.get(url, {
-      headers: {
-        "User-Agent": "AnkiApp/1.0 (tu-email@dominio.com)"
-      }
-    });
-    const data = response.data;
+    console.log('Buscando palabra en Wiktionary ES:', word);
+    
+    // Primero intentamos con la API de contenido normal
+    let url = `https://es.wiktionary.org/api/rest_v1/page/html/${encodeURIComponent(word)}`;
+    console.log('URL de búsqueda:', url);
+    
+    let response;
+    try {
+      response = await axios.get(url, {
+        headers: {
+          "User-Agent": "AnkiApp/1.0 (tu-email@dominio.com)",
+          "Accept": "text/html"
+        },
+        timeout: 10000
+      });
+    } catch (err) {
+      // Si falla la API REST, intentamos con web scraping directo
+      console.log('API REST falló, intentando web scraping directo...');
+      return await fetchWiktionaryEsWebScraping(word);
+    }
 
-    // 2) La respuesta incluye `data.lead.html` (la parte superior, con pronunciación, etimología, etc.)
-    //    y `data.remaining.html` (el resto de secciones). Concatenamos ambos fragmentos:
-    const fullHtml = `${data.lead.html}${data.remaining.html || ""}`;
-    const $ = cheerio.load(fullHtml);
+    if (!response.data) {
+      console.log('No hay data en la respuesta');
+      return null;
+    }
 
-    // 3) Extraer IPA de la tabla .pron-graf (la tabla de pronunciación que se ubica junto al título)
-    //    Buscar <table class="pron-graf"> y dentro <span> o directamente el texto ['au.to'], etc.
+    const $ = cheerio.load(response.data);
+    console.log('HTML cargado correctamente');
+
+    // Extraer IPA
     let ipa = null;
-    const pronGraf = $("table.pron-graf");
-    if (pronGraf.length) {
-      // Dentro de la tabla, normalmente está en un <td> que contiene algo como "['au.to']"
-      // Seleccionamos el primer <td> que siga al encabezado de AFI
-      const textoIpa = pronGraf.find("td").filter((i, el) => {
-        const t = $(el).text().trim();
-        // Filtramos aquel <td> cuyo contenido parezca tener corchetes de IPA
-        return /\[.+\]/.test(t);
-      }).first().text().trim();
-
-      if (textoIpa) {
-        // Si viene algo como "['au.to']" o "[ˈar.bol]", nos quedamos solo con el interior
-        const match = textoIpa.match(/\[([^\]]+)\]/);
-        if (match && match[1]) {
+    
+    // Buscar en diferentes posibles ubicaciones del IPA
+    const ipaSelectors = [
+      'table.pron-graf td',
+      '.IPA',
+      '.pronunciación',
+      'span[title*="AFI"]'
+    ];
+    
+    for (const selector of ipaSelectors) {
+      const elements = $(selector);
+      elements.each((i, el) => {
+        const text = $(el).text().trim();
+        const match = text.match(/\[([^\]]+)\]/) || text.match(/\/([^\/]+)\//);
+        if (match) {
           ipa = `/${match[1]}/`;
+          return false; // break
         }
-      }
+      });
+      if (ipa) break;
     }
 
-    // 4) Extraer la primera definición:
-    //    Buscamos la sección de “Sustantivo_masculino” primero. Si no existe, buscamos “Sustantivo_femenino” u otras.
-    //    El HTML de cada sección tiene un <h3 id="Sustantivo_masculino"> y luego, generalmente, un <p> o un <dl><dt><dd>.
+    // Extraer definición
     let meaning = null;
-    // Intentamos encontrar <h3 id="Sustantivo_masculino"> y extraer el primer <dd> de su lista <dl>
-    let sección = $('h3[id="Sustantivo_masculino"]');
-    if (!sección.length) {
-      // Si no hay “Sustantivo_masculino”, quizá sea “Sustantivo_femenino” u otra categoría
-      sección = $('h3[id^="Sustantivo"]').first();
-    }
-    if (sección.length) {
-      // El siguiente <dl> inmediato contendrá <dt> (número de acepción) y <dd> (texto de definición)
-      const dl = sección.nextAll("dl").first();
-      if (dl.length) {
-        // Tomamos el primer <dd> como la definición principal
-        const primeraDd = dl.find("dd").first();
-        if (primeraDd.length) {
-          meaning = primeraDd.text().trim();
+    
+    // Buscar secciones de definición
+    const definitionSections = [
+      'h3[id*="Sustantivo"]',
+      'h3[id*="Verbo"]',
+      'h3[id*="Adjetivo"]',
+      'h3[id*="Adverbio"]'
+    ];
+    
+    for (const sectionSelector of definitionSections) {
+      const section = $(sectionSelector).first();
+      if (section.length) {
+        // Buscar la definición después de la sección
+        const nextElements = section.nextAll();
+        
+        // Intentar encontrar en <dl><dd>, <ol><li>, o <p>
+        const definitionElement = nextElements.filter('dl').first().find('dd').first();
+        if (definitionElement.length) {
+          meaning = definitionElement.text().trim();
+          break;
+        }
+        
+        const listElement = nextElements.filter('ol').first().find('li').first();
+        if (listElement.length) {
+          meaning = listElement.text().trim();
+          break;
+        }
+        
+        const paragraphElement = nextElements.filter('p').first();
+        if (paragraphElement.length) {
+          meaning = paragraphElement.text().trim();
+          break;
         }
       }
     }
 
-    // 4.b) Si no encontramos nada en “Sustantivo…”, probamos otras categorías (“Verbo”, “Adjetivo”)
-    if (!meaning) {
-      const posibles = ["Verbo", "Adjetivo", "Adverbio", "Interjección"];
-      for (const cat of posibles) {
-        const hsec = $(`h3[id^="${cat}"]`).first();
-        if (hsec.length) {
-          const dl2 = hsec.nextAll("dl").first();
-          if (dl2.length) {
-            const dd2 = dl2.find("dd").first();
-            if (dd2.length) {
-              meaning = dd2.text().trim();
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    // 5) Extraer un ejemplo:
-    //    - Si la definición (primer <dd>) tiene un <ul><li> anidado, tomamos el texto del primer <li>.
-    let example = null;
+    // Extraer ejemplo
+    let example = "Example not found";
     if (meaning) {
-      // Ubicamos de nuevo la misma primera <dd>
-      const primeraDD = sección.nextAll("dl").first().find("dd").first();
-      // Vemos si hay un <ul><li> indenado
-      const liEj = primeraDD.find("ul li").first();
-      if (liEj.length) {
-        example = liEj.text().trim();
+      // Buscar ejemplos en elementos <ul><li> cercanos a la definición
+      const exampleElement = $('ul li').filter((i, el) => {
+        const text = $(el).text().toLowerCase();
+        return text.includes(word.toLowerCase()) && text.length > word.length + 10;
+      }).first();
+      
+      if (exampleElement.length) {
+        example = exampleElement.text().trim();
       }
     }
 
-    // Si no hallamos “example” dentro de la definición, lo dejamos como “Example not found”
-    if (!example) {
-      example = "Example not found";
-    }
+    console.log('Resultado extraído:', { ipa, meaning: meaning?.substring(0, 50), example: example?.substring(0, 50) });
 
-    // 6) Si no existe ni IPA ni definición, devolvemos null
     if (!meaning && !ipa) {
       return null;
     }
 
-    // 7) Devolvemos el objeto final
     return {
       meaning: meaning || null,
       example,
       ipa: ipa || null
     };
+
   } catch (err) {
-    // Si la página no existe (404), axios arroja error.response.status === 404
-    if (err.response && err.response.status === 404) {
-      return null;
-    }
     console.error("Error en fetchWiktionaryEsRest:", err.message);
+    if (err.response) {
+      console.error("Status:", err.response.status);
+      console.error("Headers:", err.response.headers);
+    }
+    return null;
+  }
+}
+
+/**
+ * Fallback: Web scraping directo a la página de Wiktionary
+ */
+async function fetchWiktionaryEsWebScraping(word) {
+  try {
+    console.log('Intentando web scraping directo para:', word);
+    
+    const url = `https://es.wiktionary.org/wiki/${encodeURIComponent(word)}`;
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      },
+      timeout: 10000
+    });
+
+    const $ = cheerio.load(response.data);
+    
+    // Extraer IPA de la tabla de pronunciación
+    let ipa = null;
+    $('.wikitable tr').each((i, row) => {
+      const cells = $(row).find('td');
+      if (cells.length >= 2) {
+        const firstCell = $(cells[0]).text().trim();
+        const secondCell = $(cells[1]).text().trim();
+        
+        if (firstCell.includes('AFI') || firstCell.includes('IPA')) {
+          const match = secondCell.match(/\[([^\]]+)\]/);
+          if (match) {
+            ipa = `/${match[1]}/`;
+          }
+        }
+      }
+    });
+    
+    // Extraer definición
+    let meaning = null;
+    const meaningSelectors = [
+      '#Sustantivo_masculino',
+      '#Sustantivo_femenino', 
+      '#Verbo',
+      '#Adjetivo'
+    ];
+    
+    for (const selector of meaningSelectors) {
+      const header = $(selector);
+      if (header.length) {
+        let nextElement = header.parent().next();
+        while (nextElement.length && !meaning) {
+          if (nextElement.is('dl')) {
+            meaning = nextElement.find('dd').first().text().trim();
+            break;
+          } else if (nextElement.is('ol')) {
+            meaning = nextElement.find('li').first().text().trim();
+            break;
+          }
+          nextElement = nextElement.next();
+        }
+        if (meaning) break;
+      }
+    }
+    
+    return {
+      meaning: meaning || null,
+      example: "Example not found",
+      ipa: ipa || null
+    };
+    
+  } catch (err) {
+    console.error("Error en web scraping:", err.message);
     return null;
   }
 }
@@ -454,71 +564,125 @@ async function fetchWiktionaryEsRest(word) {
  */
 console.log('Defining routes...');
 app.get("/search", async (req, res) => {
+  console.log('=== INICIO DE BÚSQUEDA ===');
+  
   // 1) Leer parámetros
   const rawWord = (req.query.word || "").trim();
   const lang = (req.query.lang || "en").trim().toLowerCase();
+  
+  console.log(`Parámetros recibidos: word="${rawWord}", lang="${lang}"`);
 
-  // 2) Validaciones
+  // 2) Validaciones básicas
   if (!rawWord) {
-    return res.status(400).json({ error: "Missing word parameter" });
+    return res.status(400).json({ error: "Falta el parámetro 'word'" });
   }
+  
   if (!["en", "es"].includes(lang)) {
-    return res.status(400).json({ error: `Idioma '${lang}' no soportado. Solo 'en' y 'es'.` });
-  }
-  if (!regexByLang[lang].test(rawWord)) {
-    return res.status(400).json({
-      error: `La palabra '${rawWord}' no es válida para el idioma '${lang}'.`
+    return res.status(400).json({ 
+      error: `Idioma '${lang}' no soportado. Solo se admiten 'en' (inglés) y 'es' (español).` 
     });
   }
 
+  // 3) Validación específica del idioma
+  const validation = validateWordForLanguage(rawWord, lang);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.reason });
+  }
+
   try {
-    // 3A) Si es inglés: dictionaryapi.dev + getExampleMultiSource (igual que antes)
+    console.log(`Procesando búsqueda para "${rawWord}" en idioma "${lang}"`);
+
+    // 4A) Procesamiento para inglés
     if (lang === "en") {
+      console.log('Buscando en diccionario de inglés...');
+      
       const responseEn = await axios.get(
-        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(rawWord)}`
+        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(rawWord)}`,
+        { timeout: 10000 }
       );
-      const dataEn = responseEn.data;              // array de resultados
-      const parsedEn = parseDictionaryData(dataEn); // { ipa, meaning, example }
+      
+      const dataEn = responseEn.data;
+      const parsedEn = parseDictionaryData(dataEn);
+      
       if (!parsedEn) {
         return res.status(404).json({
-          error: `No se encontró información para '${rawWord}' en inglés.`
+          error: `No se encontró información para '${rawWord}' en el diccionario de inglés.`
         });
       }
+
+      console.log('Datos extraídos del diccionario inglés:', { 
+        ipa: parsedEn.ipa, 
+        meaning: parsedEn.meaning?.substring(0, 50) 
+      });
+
+      // Obtener ejemplo de múltiples fuentes
       let exampleEn = await getExampleMultiSource(parsedEn.example, rawWord);
       if (!exampleEn) exampleEn = "Example not found";
 
+      console.log('=== BÚSQUEDA COMPLETADA (EN) ===');
       return res.json({
         word: rawWord.toLowerCase(),
         ipa: parsedEn.ipa || "",
         meaning: parsedEn.meaning || "",
-        example: exampleEn
+        example: exampleEn,
+        language: "en"
       });
     }
 
-    // 3B) Si es español: usamos fetchWiktionaryEsRest
+    // 4B) Procesamiento para español
     if (lang === "es") {
+      console.log('Buscando en Wiktionary español...');
+      
       const dataEs = await fetchWiktionaryEsRest(rawWord);
-      if (!dataEs) {
+      
+      if (!dataEs || (!dataEs.meaning && !dataEs.ipa)) {
+        console.log('No se encontró información en Wiktionary ES');
         return res.status(404).json({
-          error: `No se encontró información para '${rawWord}' en el diccionario de español (Wiktionary).`
+          error: `No se encontró información para '${rawWord}' en el diccionario de español.`
         });
       }
+
+      console.log('Datos extraídos de Wiktionary ES:', { 
+        ipa: dataEs.ipa, 
+        meaning: dataEs.meaning?.substring(0, 50) 
+      });
+
+      console.log('=== BÚSQUEDA COMPLETADA (ES) ===');
       return res.json({
         word: rawWord.toLowerCase(),
         ipa: dataEs.ipa || "",
         meaning: dataEs.meaning || "",
-        example: dataEs.example || "Example not found"
+        example: dataEs.example || "Example not found",
+        language: "es"
       });
     }
+
   } catch (error) {
-    // 4) Manejo de errores: dictionaryapi.dev (404) o red
+    console.error(`=== ERROR EN BÚSQUEDA [${lang}] ===`);
+    console.error('Mensaje de error:', error.message);
+    
+    if (error.response) {
+      console.error('Status de respuesta:', error.response.status);
+      console.error('URL solicitada:', error.config?.url);
+    }
+
+    // Manejo específico de errores 404
     if (error.response && error.response.status === 404) {
       return res.status(404).json({
-        error: `La palabra '${rawWord}' no existe en el diccionario de ${lang}.`
+        error: `La palabra '${rawWord}' no existe en el diccionario de ${lang === 'en' ? 'inglés' : 'español'}.`
       });
     }
-    console.error(`Error en /search [${lang}]:`, error.message);
-    return res.status(500).json({ error: error.toString() });
+
+    // Error de timeout o conexión
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      return res.status(408).json({
+        error: `Timeout al consultar el diccionario. Intenta de nuevo en unos momentos.`
+      });
+    }
+
+    return res.status(500).json({ 
+      error: `Error interno del servidor: ${error.message}` 
+    });
   }
 });
 
