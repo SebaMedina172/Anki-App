@@ -322,126 +322,105 @@ async function getExampleMultiSource(apiExample, word) {
 }
 
 /**
- * Consulta directamente la página HTML de Wiktionary en español y extrae:
- *   • El significado (primera <li> dentro de la primera <ol> en la sección Español)
- *   • Un ejemplo de uso (primer <li> dentro de un <ul> anidado, si lo hay)
- *   • La pronunciación IPA (primera <span class="IPA"> encontrada bajo “Pronunciación”)
+ * Consulta la página HTML de DLE (RAE) y extrae:
+ *  • El significado (primera definición que aparezca)
+ *  • Si hay pronunciación (IPA), la extrae del texto
+ *  • Un ejemplo (cuando el DLE lo incluya en la definición)
  *
- * Si no encuentra nada de esto, devuelve null.
+ * Si no encuentra la palabra en el DLE (404), devuelve null.
  */
-async function fetchWiktionaryEs(word) {
-  // Helper interno que toma la “forma exacta” del título (puede ser con 
-  // mayúscula inicial o no) y parsea el HTML buscado.
-  const _scrapeHtml = async (titulo) => {
-    try {
-      // 1) Descargamos el HTML completo de la página Wiktionary
-      const url = `https://es.wiktionary.org/wiki/${encodeURIComponent(titulo)}`;
-      const response = await axios.get(url, {
-        headers: { "User-Agent": "TuApp/1.0 (tunombre@ejemplo.com)" }
-      });
-      const html = response.data;
-      const $ = cheerio.load(html);
+async function fetchDiccionarioRAE(word) {
+  try {
+    // 1) Pedir el HTML de https://dle.rae.es/{word}
+    //    (el DLE suele redirigir automáticamente a su forma correcta, por ejemplo, mayúsculas, acentos, etc.)
+    const url = `https://dle.rae.es/${encodeURIComponent(word)}`;
+    const response = await axios.get(url, {
+      // Es buena práctica incluir un User-Agent que identifique tu app.
+      headers: { "User-Agent": "AnkiApp/1.0 (ejemplo@localhost)" }
+    });
 
-      // 2) Localizamos el <h2> cuya clase .mw-headline sea exactamente "Español"
-      const esHeader = $('h2 .mw-headline')
-        .filter((i, el) => $(el).text().trim() === 'Español')
-        .closest('h2');
-      if (!esHeader.length) {
-        return null;
-      }
+    const html = response.data;
+    const $ = cheerio.load(html);
 
-      // 3) Recorremos todos los hermanos inmediatos de esHeader hasta el siguiente <h2>
-      let elem = esHeader.next();
-      let meaning = null;
-      let example = null;
-      let ipa = null;
-
-      while (elem.length && elem[0].name !== 'h2') {
-        // 3.a) Si encontramos una <ol> y todavía no tenemos "meaning", lo tomamos de la primera <li>
-        if (!meaning && elem[0].name === 'ol') {
-          const primeraLi = elem.find('> li').first();
-          if (primeraLi.length) {
-            meaning = primeraLi.text().trim() || null;
-            // 3.a.i) Dentro de esa misma <li>, si hay un <ul><li> (lista de ejemplos),
-            //          tomamos el primer <li> como ejemplo.
-            const ejemploLi = primeraLi.find('ul li').first();
-            if (ejemploLi.length) {
-              example = ejemploLi.text().trim() || null;
-            }
-          }
-        }
-
-        // 3.b) Si encontramos un <h3> cuyo texto sea "Pronunciación" 
-        //      (puede ser el encabezado para IPA), buscamos ahí la primera .IPA
-        if (!ipa && elem[0].name === 'h3') {
-          const headline = elem.find('.mw-headline').text().trim();
-          if (headline === 'Pronunciación') {
-            // Vamos caminando hermanos hasta el próximo <h2> o <h3>, en busca de <span class="IPA">
-            let subElem = elem.next();
-            while (subElem.length && subElem[0].name !== 'h2' && subElem[0].name !== 'h3') {
-              const ipaSpan = subElem.find('span.IPA').first();
-              if (ipaSpan.length) {
-                ipa = ipaSpan.text().trim() || null;
-                break;
-              }
-              subElem = subElem.next();
-            }
-          }
-        }
-
-        elem = elem.next();
-      }
-
-      return {
-        meaning: meaning || null,
-        example: example || null,
-        ipa: ipa || null
-      };
-    } catch (err) {
-      console.error("Error en _scrapeHtml (Wiktionary ES):", err.message);
+    // 2) El DLE estructura la entrada en varias secciones <article>. 
+    //    La definición principal suele estar dentro de <p class="j"> (primer párrafo con texto).
+    //    A veces hay más <p> dentro de <article>, pero el primero suele ser la definición base.
+    const article = $('article'); // toma el primer <article> de la página
+    if (!article.length) {
+      // Si no existe <article>, algo cambió la estructura o no hay entrada
       return null;
     }
-  };
 
-  // 4) Intentamos primero con la palabra tal cual (minúsculas)
-  let resultado = await _scrapeHtml(word);
-  if (resultado) {
-    return resultado;
-  }
-
-  // 5) Si no apareció, intentamos con la primera letra en mayúscula (p. ej. "Auto")
-  const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
-  if (capitalized !== word) {
-    resultado = await _scrapeHtml(capitalized);
-    if (resultado) {
-      return resultado;
+    // 3) Extraer la primera definición: el primer <p> de clase "j"
+    let meaning = null;
+    const primerParrafo = article.find('p.j').first();
+    if (primerParrafo.length) {
+      // Dentro de este párrafo suelen aparecer la definición y, en ocasiones, un ejemplo entre comillas.
+      // Por ejemplo: “m. Máquina automotriz.…”
+      // Extraemos el texto completo, luego podemos separar el ejemplo si está entre comillas.
+      const textoParrafo = primerParrafo.text().trim();
+      meaning = textoParrafo || null;
     }
+
+    // 4) Intentar separar un ejemplo si viene entre comillas dobles («…» o “…”).
+    //    Buscamos el primer trozo que esté entre comillas angulares « » o comillas latinas “ ”.
+    let example = null;
+    if (meaning) {
+      // Primero, extraemos texto entre comillas angulares «ejemplo»
+      let match = meaning.match(/«([^»]+)»/);
+      if (match && match[1]) {
+        example = match[1].trim();
+      } else {
+        // Si no hay « », probamos con comillas inglesas “ … ”
+        match = meaning.match(/“([^”]+)”/);
+        if (match && match[1]) {
+          example = match[1].trim();
+        }
+      }
+    }
+
+    // 5) Extraer IPA de la pronunciación, si el DLE la incluye
+    //    El DLE coloca la pronunciación entre corchetes justo después del título, como “[ˈaw.to]”.
+    //    Está dentro de un <span class="micra"> o similar, pero podemos hacer un match en todo el texto:
+    let ipa = null;
+    // Buscamos algo entre corchetes cuadrados, p. ej. “[ˈaw.to]”
+    const textoCompleto = article.text();
+    const mp = textoCompleto.match(/\[([^\]]+)\]/);
+    if (mp && mp[1]) {
+      ipa = mp[1].trim();
+      // Ponemos la barra inclinada /…/ alrededor si lo prefieres:
+      ipa = `/${ipa}/`;
+    }
+
+    return {
+      meaning,            // texto completo del primer <p.j>
+      example: example || null,
+      ipa: ipa || null
+    };
+  } catch (err) {
+    // 6) Si la petición devuelve 404 (palabra no existe), axios lanzará error.response.status===404
+    if (err.response && err.response.status === 404) {
+      return null;
+    }
+    console.error("Error en fetchDiccionarioRAE:", err.message);
+    return null;
   }
-
-  // 6) Si aun así no hay nada, devolvemos null
-  return null;
 }
-
-
-
 
 /**
  * Endpoint para buscar datos de una palabra y obtener IPA, definición y ejemplo multi-fuente.
  */
 console.log('Defining routes...');
 app.get('/search', async (req, res) => {
-  // 1) Leer parámetros
   const rawWord = (req.query.word || '').trim();
   const lang = (req.query.lang || 'en').trim().toLowerCase();
 
-  // 2) Validar entrada mínima
+  // 1) Validaciones generales
   if (!rawWord) {
     return res.status(400).json({ error: 'Missing word parameter' });
   }
   if (!['en', 'es'].includes(lang)) {
-    return res.status(400).json({
-      error: `Idioma '${lang}' no soportado. Por ahora solo 'en' y 'es'.`
-    });
+    return res.status(400).json({ error: `Idioma '${lang}' no soportado. Solo 'en' y 'es'.` });
   }
   if (!regexByLang[lang].test(rawWord)) {
     return res.status(400).json({
@@ -450,52 +429,47 @@ app.get('/search', async (req, res) => {
   }
 
   try {
-    let parsed = null;
-    // 3) Si es inglés, usamos dictionaryapi.dev + getExampleMultiSource
+    // A) Si es inglés, usar dictionaryapi.dev + getExampleMultiSource (igual que antes)
     if (lang === 'en') {
-      // Llamada a DictionaryAPI en inglés
       const responseEn = await axios.get(
         `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(rawWord)}`
       );
-      const dataEn = responseEn.data;                   // Array de resultados
-      parsed = parseDictionaryData(dataEn);             // { ipa, meaning, example }
-      if (!parsed) {
+      const dataEn = responseEn.data;              // Array con la(s) entrada(s)
+      const parsedEn = parseDictionaryData(dataEn); // tu parser original
+      if (!parsedEn) {
         return res.status(404).json({
           error: `No se encontró información para '${rawWord}' en inglés.`
         });
       }
 
-      // Ejemplo multi-fuente (API → Linguee → Tatoeba)
-      let exampleEn = await getExampleMultiSource(parsed.example, rawWord);
+      let exampleEn = await getExampleMultiSource(parsedEn.example, rawWord);
       if (!exampleEn) exampleEn = 'Example not found';
 
       return res.json({
         word: rawWord.toLowerCase(),
-        ipa: parsed.ipa || '',
-        meaning: parsed.meaning || '',
+        ipa: parsedEn.ipa || '',
+        meaning: parsedEn.meaning || '',
         example: exampleEn
       });
     }
 
-    // 4) Si es español, usamos Wiktionary
+    // B) Si es español, llamamos a fetchDiccionarioRAE
     if (lang === 'es') {
-      const wikiData = await fetchWiktionaryEs(rawWord);
-      if (!wikiData || (!wikiData.meaning && !wikiData.example && !wikiData.ipa)) {
+      const dataEs = await fetchDiccionarioRAE(rawWord);
+      if (!dataEs) {
         return res.status(404).json({
-          error: `No se encontró información para '${rawWord}' en el diccionario de español.`
+          error: `No se encontró información para '${rawWord}' en el diccionario de español (DLE).`
         });
       }
-      // Aseguramos que al menos vengan campos vacíos, nunca undefined
       return res.json({
         word: rawWord.toLowerCase(),
-        ipa: wikiData.ipa || '',
-        meaning: wikiData.meaning || '',
-        example: wikiData.example || 'Example not found'
+        ipa: dataEs.ipa || '',
+        meaning: dataEs.meaning || '',
+        example: dataEs.example || 'Example not found'
       });
     }
   } catch (error) {
-    // 5) Manejo de errores puntuales
-    //    - Si dictionaryapi.dev devolvió 404
+    // Si la petición a dictionaryapi.dev devolvió 404, la manejamos aquí.
     if (error.response && error.response.status === 404) {
       return res.status(404).json({
         error: `La palabra '${rawWord}' no existe en el diccionario de ${lang}.`
@@ -503,40 +477,6 @@ app.get('/search', async (req, res) => {
     }
     console.error(`Error en /search [${lang}]:`, error.message);
     return res.status(500).json({ error: error.toString() });
-  }
-});
-
-
-// ======= Preview endpoint: Retorna 5 imagenes con su URL's =======
-app.get('/search-image', async (req, res) => {
-  const query = (req.query.query || '').trim();
-  const lang = (req.query.lang || 'en').trim().toLowerCase();
-
-  if (!query) {
-    return res.status(400).json({ error: 'Missing query parameter' });
-  }
-  if (!['en', 'es'].includes(lang)) {
-    return res.status(400).json({
-      error: `Idioma '${lang}' no soportado para búsqueda de imágenes.`
-    });
-  }
-
-  try {
-    const apiKey = process.env.PIXABAY_API_KEY;
-    // Nota: podrías traducir el query (“perro” → “dog”) si quisieras resultados en 
-    // inglés, pero aquí dejamos la palabra tal cual
-    const resp = await axios.get("https://pixabay.com/api/", {
-      params: { key: apiKey, q: query, per_page: 5, image_type: "photo", safesearch: true }
-    });
-    const images = resp.data.hits.map((hit) => ({
-      id: hit.id,
-      previewURL: hit.previewURL,
-      fullURL: hit.largeImageURL || hit.webformatURL,
-    }));
-    res.json({ images });
-  } catch (error) {
-    console.error("Error in GET /search-image:", error.message);
-    res.status(500).json({ error: error.toString() });
   }
 });
 
