@@ -11,6 +11,14 @@ const cheerio   = require('cheerio');      // <— para getExampleFromLinguee
 const puppeteer = require('puppeteer');    // <— para getExampleFromTatoeba
 const googleTTS = require('google-tts-api');
 
+// ============================================
+//  Regex mínimos para validar “word” según idioma
+// ============================================
+const regexByLang = {
+  en: /^[A-Za-z'-]+$/,                             // sólo letras A-Z o apóstrofe/guión
+  es: /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'-]+$/                 // incluye vocales acentuadas y ñ
+};
+
 // Create Express app
 const app = express();
 
@@ -318,27 +326,79 @@ async function getExampleMultiSource(apiExample, word) {
  */
 console.log('Defining routes...');
 app.get('/search', async (req, res) => {
-  const word = req.query.word;
-  if (!word) {
+  // 1) Leer parámetros
+  const rawWord = (req.query.word || '').trim();
+  const lang = (req.query.lang || 'en').trim().toLowerCase();
+
+  // 2) Validar que envíe palabra y que el idioma sea soportado (solo 'en' o 'es')
+  if (!rawWord) {
     return res.status(400).json({ error: 'Missing word parameter' });
   }
+  if (!['en', 'es'].includes(lang)) {
+    return res.status(400).json({ error: `Idioma '${lang}' no soportado. Solo 'en' y 'es'.` });
+  }
+
+  // 3) Validación básica con regex: la palabra debe cumplir el charset del idioma
+  if (!regexByLang[lang].test(rawWord)) {
+    return res
+      .status(400)
+      .json({ error: `La palabra '${rawWord}' no es válida para el idioma '${lang}'.` });
+  }
+
+  // 4) Determinar URL del diccionario según idioma
+  let apiUrl;
+  switch (lang) {
+    case 'en':
+      apiUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${rawWord}`;
+      break;
+    case 'es':
+      apiUrl = `https://api.dictionaryapi.dev/api/v2/entries/es/${rawWord}`;
+      break;
+  }
+
   try {
-    const response = await axios.get(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
-    const data = response.data;
-    const parsed = parseDictionaryData(data);
+    // 5) Hacer la petición a dictionaryapi.dev
+    const response = await axios.get(apiUrl);
+    const data = response.data;                     // Array de entradas, formato JSON de dictionaryapi.dev
+    const parsed = parseDictionaryData(data);       // parseDictionaryData funciona igual para en/​es
+
+    // 6) Si no se pudo extraer (ej. la API devolvió 404 o la estructura cambió)
     if (!parsed) {
-      return res.status(404).json({ error: 'No valid data found for the word' });
+      return res.status(404).json({
+        error: `No se encontró información para '${rawWord}' en el diccionario de ${lang}.`
+      });
     }
-    const example = await getExampleMultiSource(parsed.example, word);
-    res.json({
-      word: word.toLowerCase(),
-      ipa: parsed.ipa,
-      meaning: parsed.meaning,
-      example
+
+    // 7) Obtener ‘example’:
+    //  - Si es inglés: uso tu getExampleMultiSource (API → Linguee → Tatoeba)
+    //  - Si es español: tomo directamente el ejemplo que devolvió dictionaryapi.dev (parsed.example),
+    //    o “Example not found” si no existe.
+    let exampleToSend = parsed.example || null;
+    if (lang === 'en') {
+      exampleToSend = await getExampleMultiSource(parsed.example, rawWord);
+    }
+    if (!exampleToSend) {
+      exampleToSend = 'Example not found';
+    }
+
+    // 8) Devolver JSON uniforme
+    return res.json({
+      word: rawWord.toLowerCase(),
+      ipa: parsed.ipa || '',         // en español /inglés, parsed.ipa viene de parseDictionaryData
+      meaning: parsed.meaning || '',
+      example: exampleToSend
     });
   } catch (error) {
-    console.error('Error en /search:', error.message);
-    res.status(500).json({ error: error.toString() });
+    // 9) Manejo de errores:
+    //    - Si la API devolvió 404 directamente (palabra no existe en ese idioma)
+    if (error.response && error.response.status === 404) {
+      return res.status(404).json({
+        error: `La palabra '${rawWord}' no existe en el diccionario de ${lang}.`
+      });
+    }
+    //    - Cualquier otro error de red / inesperado
+    console.error(`Error en /search [${lang}]:`, error.message);
+    return res.status(500).json({ error: error.toString() });
   }
 });
 
