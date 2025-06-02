@@ -885,28 +885,201 @@ function cleanMeaningText(text) {
 }
 
 /**
- * Función mejorada para obtener ejemplos en español con múltiples intentos
+ * Función mejorada para obtener ejemplos en español - más estricta
  */
 async function getExampleSpanishImproved(word) {
   try {
-    console.log(`=== Iniciando búsqueda de ejemplo para: ${word} ===`);
+    console.log(`=== Iniciando búsqueda ESTRICTA de ejemplo para: ${word} ===`);
     
-    // Intentar obtener ejemplo de las fuentes principales
-    let example = await getExampleSpanish(word);
+    // Intentar obtener ejemplo real de las fuentes principales
+    let example = await getExampleSpanishStrict(word);
     
-    // Si no se encontró ejemplo, usar función de respaldo
-    if (!example || example === "Ejemplo no encontrado") {
-      console.log(`No se encontró ejemplo en fuentes externas, creando ejemplo simple para: ${word}`);
-      example = createSimpleExample(word);
+    // Si no se encontró ejemplo real, devolver mensaje claro
+    if (!example) {
+      console.log(`No se encontró ejemplo real para: ${word}`);
+      return "Ejemplo no encontrado";
     }
     
-    console.log(`=== Ejemplo final para ${word}: ${example} ===`);
+    console.log(`=== Ejemplo real encontrado para ${word}: ${example} ===`);
     return example;
     
   } catch (error) {
     console.error('Error en getExampleSpanishImproved:', error.message);
-    return createSimpleExample(word);
+    return "Ejemplo no encontrado";
   }
+}
+
+/**
+ * Búsqueda estricta de ejemplos - solo devuelve ejemplos reales
+ */
+async function getExampleSpanishStrict(word) {
+  console.log(`Buscando ejemplo REAL en español para: ${word}`);
+  
+  // Intentar múltiples fuentes en orden de prioridad
+  const sources = [
+    () => getExampleFromTatoebaApi(word),
+    () => getExampleFromTatoebaScraping(word),
+    () => getExampleFromSpanishDict(word),
+    () => getExampleFromLingueeSpanish(word),
+    () => getExampleFromRAE(word), // Nueva fuente: RAE
+    () => getExampleFromWordReference(word) // Nueva fuente: WordReference
+  ];
+  
+  for (const getExample of sources) {
+    try {
+      const example = await getExample();
+      if (example && isValidRealExample(example, word)) {
+        console.log(`Ejemplo REAL encontrado: ${example}`);
+        return example;
+      }
+    } catch (error) {
+      console.log(`Error en una fuente de ejemplos: ${error.message}`);
+      continue;
+    }
+  }
+  
+  return null; // No devolver ejemplos artificiales
+}
+
+/**
+ * Nueva fuente: Ejemplos del Diccionario de la RAE
+ */
+async function getExampleFromRAE(word) {
+  try {
+    console.log(`Intentando RAE para: ${word}`);
+    
+    const url = `https://dle.rae.es/${encodeURIComponent(word)}`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      timeout: 10000
+    });
+    
+    const $ = cheerio.load(response.data);
+    
+    // Buscar ejemplos en la RAE
+    const exampleSelectors = [
+      '.ejemplo',
+      '.ej',
+      'span[title="ejemplo"]',
+      '.ejemplo-texto'
+    ];
+    
+    for (const selector of exampleSelectors) {
+      const examples = $(selector);
+      
+      for (let i = 0; i < examples.length; i++) {
+        const example = examples.eq(i).text().trim();
+        
+        if (example && 
+            example.toLowerCase().includes(word.toLowerCase()) && 
+            example.split(' ').length >= 4 && 
+            example.split(' ').length <= 20) {
+          // Limpiar comillas y caracteres extraños
+          const cleanExample = example.replace(/[""'']/g, '"').trim();
+          return cleanExample;
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.log("Error en RAE:", error.message);
+  }
+  
+  return null;
+}
+
+/**
+ * Nueva fuente: WordReference español
+ */
+async function getExampleFromWordReference(word) {
+  try {
+    console.log(`Intentando WordReference para: ${word}`);
+    
+    const url = `https://www.wordreference.com/definicion/${encodeURIComponent(word)}`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      timeout: 10000
+    });
+    
+    const $ = cheerio.load(response.data);
+    
+    // Buscar ejemplos en WordReference
+    const exampleSelectors = [
+      '.example',
+      '.FrEx',
+      'td[style*="font-style:italic"]',
+      '.exemple'
+    ];
+    
+    for (const selector of exampleSelectors) {
+      const examples = $(selector);
+      
+      for (let i = 0; i < examples.length; i++) {
+        const example = examples.eq(i).text().trim();
+        
+        if (example && 
+            example.toLowerCase().includes(word.toLowerCase()) && 
+            example.split(' ').length >= 4 && 
+            example.split(' ').length <= 25) {
+          return example.replace(/[""'']/g, '"').trim();
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.log("Error en WordReference:", error.message);
+  }
+  
+  return null;
+}
+
+
+/**
+ * Valida que un ejemplo sea real y de calidad
+ */
+function isValidRealExample(example, word) {
+  if (!example || typeof example !== 'string') return false;
+  
+  const cleanExample = example.trim().toLowerCase();
+  const cleanWord = word.trim().toLowerCase();
+  
+  // Debe contener la palabra
+  if (!cleanExample.includes(cleanWord)) return false;
+  
+  // Debe tener longitud mínima y máxima razonable
+  const wordCount = example.split(' ').length;
+  if (wordCount < 4 || wordCount > 25) return false;
+  
+  // No debe ser una plantilla obvia
+  const templatePatterns = [
+    /la palabra .* es/i,
+    /necesito usar .* en/i,
+    /conoces el significado de/i,
+    /la definición de .* es/i,
+    /el término .* se usa/i
+  ];
+  
+  for (const pattern of templatePatterns) {
+    if (pattern.test(example)) {
+      console.log(`Ejemplo rechazado por ser plantilla: ${example}`);
+      return false;
+    }
+  }
+  
+  // No debe contener URLs o elementos extraños
+  if (cleanExample.includes('http') || 
+      cleanExample.includes('@') || 
+      cleanExample.includes('www.')) {
+    return false;
+  }
+  
+  return true;
 }
 
 /**
@@ -944,32 +1117,48 @@ async function getExampleSpanish(word) {
  */
 async function getExampleFromTatoebaApi(word) {
   try {
-    console.log(`Intentando API de Tatoeba para: ${word}`);
+    console.log(`Intentando API de Tatoeba mejorada para: ${word}`);
     
-    // Usar la API de búsqueda de Tatoeba
-    const searchUrl = `https://tatoeba.org/en/api_v0/search?from=spa&to=spa&query=${encodeURIComponent(word)}`;
+    // Probar diferentes endpoints de Tatoeba
+    const urls = [
+      `https://tatoeba.org/en/api_v0/search?from=spa&to=spa&query=${encodeURIComponent(word)}`,
+      `https://tatoeba.org/es/api_v0/search?from=spa&to=spa&query=${encodeURIComponent(word)}`
+    ];
     
-    const response = await axios.get(searchUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json'
-      },
-      timeout: 10000
-    });
-    
-    if (response.data && response.data.results) {
-      for (const result of response.data.results) {
-        if (result.text && 
-            result.text.toLowerCase().includes(word.toLowerCase()) && 
-            result.text.split(' ').length >= 4 && 
-            result.text.split(' ').length <= 20) {
-          return result.text.trim();
+    for (const searchUrl of urls) {
+      try {
+        const response = await axios.get(searchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          },
+          timeout: 8000
+        });
+        
+        if (response.data && response.data.results) {
+          // Ordenar por relevancia (los que contienen la palabra exacta primero)
+          const sortedResults = response.data.results.sort((a, b) => {
+            const aExact = a.text.toLowerCase().split(' ').includes(word.toLowerCase());
+            const bExact = b.text.toLowerCase().split(' ').includes(word.toLowerCase());
+            if (aExact && !bExact) return -1;
+            if (!aExact && bExact) return 1;
+            return 0;
+          });
+          
+          for (const result of sortedResults) {
+            if (result.text && isValidRealExample(result.text, word)) {
+              return result.text.trim();
+            }
+          }
         }
+      } catch (urlError) {
+        console.log(`Error con URL ${searchUrl}:`, urlError.message);
+        continue;
       }
     }
     
   } catch (error) {
-    console.log("Error en API de Tatoeba:", error.message);
+    console.log("Error en API de Tatoeba mejorada:", error.message);
   }
   
   return null;
@@ -1120,18 +1309,276 @@ async function getExampleFromLingueeSpanish(word) {
 }
 
 /**
- * Función de respaldo - crear ejemplo simple con la palabra
+ * Construye una query inteligente para búsquedas en español
  */
-function createSimpleExample(word) {
-  const templates = [
-    `La palabra "${word}" es importante.`,
-    `Necesito usar "${word}" en mi trabajo.`,
-    `¿Conoces el significado de "${word}"?`,
-    `La definición de "${word}" es clara.`,
-    `El término "${word}" se usa frecuentemente.`
+async function buildSmartSpanishQuery(spanishQuery) {
+  try {
+    console.log(`Construyendo query inteligente para: "${spanishQuery}"`);
+    
+    // 1. Detectar si es una sola palabra o frase
+    const words = spanishQuery.trim().split(/\s+/);
+    
+    if (words.length === 1) {
+      // Una sola palabra: traducir directamente
+      const singleWord = words[0];
+      const translated = await translateWithContext(singleWord, 'es', 'en');
+      console.log(`Palabra única traducida: ${singleWord} -> ${translated}`);
+      return translated;
+    }
+    
+    // 2. Para frases: estrategia híbrida
+    return await buildHybridQuery(spanishQuery, words);
+    
+  } catch (error) {
+    console.error('Error construyendo query inteligente:', error);
+    // Fallback: traducir toda la frase
+    try {
+      const fallback = await translate(spanishQuery, { to: 'en' });
+      return fallback.text.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+    } catch (e) {
+      return spanishQuery; // Último recurso
+    }
+  }
+}
+
+/**
+ * Traduce con mejor contexto usando sinónimos y alternativas
+ */
+async function translateWithContext(word, from, to) {
+  try {
+    // Diccionario de traducciones específicas para mejorar resultados visuales
+    const visualTranslations = {
+      'gato': 'cat',
+      'perro': 'dog',
+      'casa': 'house home',
+      'niño': 'child boy',
+      'niña': 'child girl',
+      'bebé': 'baby',
+      'familia': 'family',
+      'comida': 'food meal',
+      'coche': 'car automobile',
+      'árbol': 'tree',
+      'flor': 'flower',
+      'agua': 'water',
+      'fuego': 'fire',
+      'sol': 'sun',
+      'luna': 'moon',
+      'montaña': 'mountain',
+      'playa': 'beach',
+      'ciudad': 'city urban',
+      'campo': 'countryside field',
+      'trabajo': 'work office job',
+      'escuela': 'school classroom',
+      'hospital': 'hospital medical',
+      'restaurante': 'restaurant dining',
+      'amor': 'love couple romance',
+      'feliz': 'happy joy smile',
+      'triste': 'sad crying',
+      'grande': 'big large',
+      'pequeño': 'small little',
+      'rápido': 'fast speed',
+      'lento': 'slow',
+      'nuevo': 'new modern',
+      'viejo': 'old vintage'
+    };
+    
+    const lowerWord = word.toLowerCase();
+    if (visualTranslations[lowerWord]) {
+      console.log(`Traducción visual específica: ${word} -> ${visualTranslations[lowerWord]}`);
+      return visualTranslations[lowerWord];
+    }
+    
+    // Traducción estándar
+    const result = await translate(word, { from, to });
+    return result.text.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+    
+  } catch (error) {
+    console.error(`Error traduciendo "${word}":`, error);
+    return word;
+  }
+}
+
+/**
+ * Construye query híbrida para frases en español
+ */
+async function buildHybridQuery(originalQuery, words) {
+  try {
+    // 1. Extraer palabras clave importantes
+    const extractorConfig = {
+      language: 'spanish',
+      remove_digits: true,
+      return_changed_case: true,
+      remove_duplicates: true,
+    };
+    
+    const keywords = keywordExtractor.extract(originalQuery, extractorConfig);
+    const importantWords = keywords.slice(0, 3); // Máximo 3 palabras clave
+    
+    console.log(`Palabras clave extraídas: ${importantWords.join(', ')}`);
+    
+    // 2. Traducir palabras clave individualmente con contexto
+    const translatedKeywords = [];
+    for (const word of importantWords) {
+      const translated = await translateWithContext(word, 'es', 'en');
+      if (translated && translated !== word) {
+        translatedKeywords.push(translated);
+      }
+    }
+    
+    // 3. También obtener traducción de la frase completa como respaldo
+    let fullTranslation = '';
+    try {
+      const fullResult = await translate(originalQuery, { to: 'en' });
+      fullTranslation = fullResult.text.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+    } catch (e) {
+      console.log('No se pudo traducir la frase completa');
+    }
+    
+    // 4. Combinar estratégicamente
+    let finalQuery = '';
+    if (translatedKeywords.length > 0) {
+      finalQuery = translatedKeywords.join(' ');
+      
+      // Si la traducción completa es muy diferente y corta, agregarla
+      if (fullTranslation && 
+          fullTranslation.length < 30 && 
+          !translatedKeywords.join(' ').includes(fullTranslation)) {
+        finalQuery += ' ' + fullTranslation;
+      }
+    } else {
+      finalQuery = fullTranslation || originalQuery;
+    }
+    
+    console.log(`Query híbrida construida: "${finalQuery}"`);
+    return finalQuery.trim();
+    
+  } catch (error) {
+    console.error('Error en buildHybridQuery:', error);
+    return originalQuery;
+  }
+}
+
+
+/**
+ * Busca imágenes con múltiples intentos y fallbacks
+ */
+async function searchImagesWithFallback(primaryQuery, originalQuery, lang) {
+  try {
+    console.log(`Buscando imágenes para: "${primaryQuery}"`);
+    
+    // Intento 1: Query principal
+    let images = await searchPixabayImages(primaryQuery);
+    
+    if (images.length > 0 && !areImagesPlaceholders(images)) {
+      console.log(`✓ Imágenes encontradas con query principal`);
+      return images;
+    }
+    
+    // Intento 2: Si es español, probar con traducción más simple
+    if (lang === 'es' && originalQuery !== primaryQuery) {
+      console.log(`Probando con traducción simple...`);
+      try {
+        const simpleTranslation = await translate(originalQuery, { to: 'en' });
+        const simplifiedQuery = simpleTranslation.text
+          .toLowerCase()
+          .replace(/[^a-z\s]/g, '')
+          .split(' ')
+          .slice(0, 2)
+          .join(' ');
+        
+        images = await searchPixabayImages(simplifiedQuery);
+        if (images.length > 0 && !areImagesPlaceholders(images)) {
+          console.log(`✓ Imágenes encontradas con traducción simple: "${simplifiedQuery}"`);
+          return images;
+        }
+      } catch (e) {
+        console.log('Error en traducción simple:', e.message);
+      }
+    }
+    
+    // Intento 3: Query más genérica (primera palabra clave)
+    const firstWord = primaryQuery.split(' ')[0];
+    if (firstWord && firstWord !== primaryQuery) {
+      console.log(`Probando con primera palabra: "${firstWord}"`);
+      images = await searchPixabayImages(firstWord);
+      if (images.length > 0 && !areImagesPlaceholders(images)) {
+        console.log(`✓ Imágenes encontradas con primera palabra`);
+        return images;
+      }
+    }
+    
+    // Último recurso: placeholder personalizado
+    console.log(`No se encontraron imágenes relevantes, usando placeholder`);
+    return createCustomPlaceholder(originalQuery);
+    
+  } catch (error) {
+    console.error('Error en searchImagesWithFallback:', error);
+    return createCustomPlaceholder(originalQuery);
+  }
+}
+
+/**
+ * Busca imágenes en Pixabay con configuración optimizada
+ */
+async function searchPixabayImages(query) {
+  try {
+    const response = await axios.get('https://pixabay.com/api/', {
+      params: {
+        key: PIXABAY_API_KEY,
+        q: query,
+        per_page: 8, // Buscar más para filtrar mejor
+        image_type: 'photo',
+        safesearch: true,
+        lang: 'en',
+        min_width: 300,
+        min_height: 200,
+        category: 'backgrounds,fashion,nature,places,animals,industry,computer,food,sports,transportation,travel,buildings,business,music'
+      },
+      timeout: 10000
+    });
+    
+    const hits = response.data.hits || [];
+    
+    if (hits.length === 0) {
+      return [];
+    }
+    
+    // Filtrar y seleccionar las mejores imágenes
+    const filteredHits = hits
+      .filter(hit => hit.previewURL && hit.largeImageURL)
+      .slice(0, 5); // Solo las primeras 5
+    
+    return filteredHits.map(hit => ({
+      id: hit.id,
+      previewURL: hit.previewURL,
+      fullURL: hit.largeImageURL || hit.webformatURL,
+    }));
+    
+  } catch (error) {
+    console.error('Error buscando en Pixabay:', error);
+    return [];
+  }
+}
+
+/**
+ * Verifica si las imágenes son placeholders
+ */
+function areImagesPlaceholders(images) {
+  return images.length === 1 && images[0].id === -1;
+}
+
+/**
+ * Crea placeholder personalizado más atractivo
+ */
+function createCustomPlaceholder(query) {
+  const encodedQuery = encodeURIComponent(query);
+  return [
+    {
+      id: -1,
+      previewURL: `https://via.placeholder.com/300x200/4a90e2/ffffff?text=${encodedQuery}`,
+      fullURL: `https://via.placeholder.com/600x400/4a90e2/ffffff?text=${encodedQuery}`,
+    },
   ];
-  
-  return templates[Math.floor(Math.random() * templates.length)];
 }
 
 /**
@@ -1271,7 +1718,7 @@ app.get("/search", async (req, res) => {
 
 // ======= Preview endpoint: Retorna 5 imagenes con su URL's =======
 app.get('/search-image', async (req, res) => {
-  let query = (req.query.query || '').trim();    // Ej: "niño corriendo en el parque"
+  let query = (req.query.query || '').trim();   
   const lang = (req.query.lang || 'en').trim().toLowerCase();
 
   if (!query) {
@@ -1284,86 +1731,25 @@ app.get('/search-image', async (req, res) => {
   }
 
   try {
-    // 1) Extraer keywords del texto en su propio idioma
-    const extractorConfig = {
-      language:             lang === 'es' ? 'spanish' : 'english',
-      remove_digits:        true,
-      return_changed_case:  true,
-      remove_duplicates:    true,
-    };
-    // keywordExtractor.extract devuelve un array de strings
-    const allKeywords = keywordExtractor.extract(query, extractorConfig);
-    // Tomamos sólo las primeras 4 para no saturar la traducción
-    const topKeywords = allKeywords.slice(0, 4); 
-    // Ej: ["niño", "corriendo", "parque"]
-
-    // 2) Si estamos en español, traducir cada palabra al inglés
-    let keywordsEn = [];
-    if (lang === 'es') {
-      // Traducimos palabra por palabra para tener términos simples en inglés
-      const promises = topKeywords.map((palabraEs) => 
-        translate(palabraEs, { to: 'en' })
-          .then((r) => {
-            // Normalizamos a minúsculas y quitamos caracteres no alfabéticos
-            return r.text.toLowerCase().replace(/[^a-z]/g, '');
-          })
-          .catch((e) => {
-            console.warn(`No se pudo traducir "${palabraEs}":`, e);
-            return '';
-          })
-      );
-      const translatedArr = await Promise.all(promises);
-      // Filtramos cadenas vacías
-      keywordsEn = translatedArr.filter((w) => w.length > 0);
-    } else {
-      // Si ya está en inglés, usamos las mismas topKeywords
-      keywordsEn = topKeywords;
-    }
-
-    // 3) Construir la query final para Pixabay
     let finalQuery = '';
-    if (keywordsEn.length > 0) {
-      finalQuery = keywordsEn.join(' ');
+    
+    if (lang === 'es') {
+      finalQuery = await buildSmartSpanishQuery(query);
     } else {
-      // Si no se extrajo nada, usamos el texto original (aunque puede ser muy largo)
-      finalQuery = query;
+      const extractorConfig = {
+        language: 'english',
+        remove_digits: true,
+        return_changed_case: true,
+        remove_duplicates: true,
+      };
+      const allKeywords = keywordExtractor.extract(query, extractorConfig);
+      finalQuery = allKeywords.slice(0, 4).join(' ');
     }
 
-    console.log('[search-image] Query para Pixabay:', finalQuery);
+    console.log('[search-image] Query final para Pixabay:', finalQuery);
 
-    // 4) Llamar a Pixabay (buscando siempre en inglés porque sus etiquetas
-    //    funcionan mejor así)
-    const pixabayResp = await axios.get('https://pixabay.com/api/', {
-      params: {
-        key:        PIXABAY_API_KEY,
-        q:          finalQuery,
-        per_page:   5,
-        image_type: 'photo',
-        safesearch: true,
-        lang:       'en',
-      },
-    });
-
-    const hits = pixabayResp.data.hits || [];
-    let images = [];
-
-    if (hits.length === 0) {
-      // Si no hubo resultados, devolvemos un placeholder
-      images = [
-        {
-          id: -1,
-          previewURL: `https://via.placeholder.com/300x200?text=${encodeURIComponent(finalQuery)}`,
-          fullURL:    `https://via.placeholder.com/300x200?text=${encodeURIComponent(finalQuery)}`,
-        },
-      ];
-    } else {
-      // Mapear los primeros 5 hits al formato que espera el front
-      images = hits.map((hit) => ({
-        id:         hit.id,
-        previewURL: hit.previewURL,
-        fullURL:    hit.largeImageURL || hit.webformatURL,
-      }));
-    }
+    // Llamar a Pixabay con múltiples intentos si no hay buenos resultados
+    let images = await searchImagesWithFallback(finalQuery, query, lang);
 
     return res.json({ images });
   } catch (error) {
