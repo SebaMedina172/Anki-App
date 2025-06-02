@@ -1264,6 +1264,39 @@ app.get("/search", async (req, res) => {
   }
 });
 
+// ======= Preview endpoint: Retorna 5 imagenes con su URL's =======
+app.get('/search-image', async (req, res) => {
+  const query = (req.query.query || '').trim();
+  const lang = (req.query.lang || 'en').trim().toLowerCase();
+
+  if (!query) {
+    return res.status(400).json({ error: 'Missing query parameter' });
+  }
+  if (!['en', 'es'].includes(lang)) {
+    return res.status(400).json({
+      error: `Idioma '${lang}' no soportado para búsqueda de imágenes.`
+    });
+  }
+
+  try {
+    const apiKey = process.env.PIXABAY_API_KEY;
+    // Nota: podrías traducir el query (“perro” → “dog”) si quisieras resultados en 
+    // inglés, pero aquí dejamos la palabra tal cual
+    const resp = await axios.get("https://pixabay.com/api/", {
+      params: { key: apiKey, q: query, per_page: 5, image_type: "photo", safesearch: true }
+    });
+    const images = resp.data.hits.map((hit) => ({
+      id: hit.id,
+      previewURL: hit.previewURL,
+      fullURL: hit.largeImageURL || hit.webformatURL,
+    }));
+    res.json({ images });
+  } catch (error) {
+    console.error("Error in GET /search-image:", error.message);
+    res.status(500).json({ error: error.toString() });
+  }
+});
+
 // ======= Descarga las imagens seleccionadas, en MEDIA PATH =======
 app.post('/save-image', upload.single('file'), async (req, res) => {
   try {
