@@ -325,101 +325,130 @@ async function getExampleMultiSource(apiExample, word) {
  * Consulta la página de Wiktionary en español y extrae definición y ejemplo.
  * Si no encuentra nada, devuelve null.
  */
+/**
+ * Consulta la página de Wiktionary en español y extrae definición y ejemplo.
+ * Si no encuentra nada con el título tal cual, vuelve a intentar capitalizando la primera letra.
+ */
 async function fetchWiktionaryEs(word) {
-  try {
-    // 1) Llamada a la API de MediaWiki para obtener HTML renderizado de la página
-    const url = `https://es.wiktionary.org/w/api.php?action=parse&page=${encodeURIComponent(
-      word
-    )}&prop=text&format=json`;
-    const response = await axios.get(url, {
-      headers: { "User-Agent": "YourAppName/1.0 (tuemail@ejemplo.com)" }
-    });
-    if (!response.data.parse) return null;
+  // Helper interno para hacer la petición a MediaWiki y parsear.
+  const _parseEs = async (titulo) => {
+    try {
+      // 1) Pedimos el HTML renderizado con `redirects=true`
+      const url = `https://es.wiktionary.org/w/api.php` +
+        `?action=parse` +
+        `&page=${encodeURIComponent(titulo)}` +
+        `&prop=text` +
+        `&format=json` +
+        `&redirects=true`;
+      const response = await axios.get(url, {
+        headers: { "User-Agent": "TuApp/1.0 (tunombre@ejemplo.com)" }
+      });
 
-    // 2) HTML completo del artículo de Wiktionary (plantilla de la página)
-    const html = response.data.parse.text["*"];
-    const $ = cheerio.load(html);
-
-    // 3) Buscamos la sección "Español" (span#Español dentro de un <h2> o <h3>)
-    const esHeader = $("span#Español").closest("h2, h3");
-    if (!esHeader.length) return null;
-
-    // 4) A partir de esa cabecera, buscamos el primer <ol> con definiciones
-    //    que venga después de la sección "Español".  
-    //    (En Wiktionary, las definiciones suelen ir en una lista ordenada <ol>)
-    let definition = null;
-    esHeader.nextAll("ol").first().children("li").each((i, el) => {
-      if (i === 0) {
-        // Tomamos el texto de la primera definición
-        definition = $(el).text().trim();
-        return false; // salimos del .each
+      // Si no trae `parse`, devolvemos null de una
+      if (!response.data.parse || !response.data.parse.text) {
+        return null;
       }
-    });
 
-    // 5) Intentar extraer un ejemplo: 
-    //    En Wiktionary las oraciones de ejemplo a veces están en <ul class="ejemplos"> 
-    //    o dentro de la misma <li> de definición en <ul><li>.
-    let example = null;
-    esHeader
-      .nextAll("ul.ejemplos")
-      .first()
-      .find("li")
-      .each((i, el) => {
-        const text = $(el).text().trim();
-        if (text && text.split(" ").length > 3) {
-          example = text;
+      // 2) Cargar el HTML en Cheerio
+      const html = response.data.parse.text["*"];
+      const $ = cheerio.load(html);
+
+      // 3) Buscar la cabecera de “Español” (puede estar en <h2> o <h3>)
+      const esHeader = $("span#Español").closest("h2, h3");
+      if (!esHeader.length) {
+        return null;
+      }
+
+      // 4) Extraer la primera definición (<ol> bajo esa sección)
+      let meaning = null;
+      esHeader.nextAll("ol").first().children("li").each((i, el) => {
+        if (i === 0) {
+          meaning = $(el).text().trim();
           return false;
         }
       });
 
-    // 6) Si no hubo lista con clase "ejemplos", revisamos si la propia <li> 
-    //    de definición contenía subconjuntos <ul><li> con ejemplos
-    if (!example) {
+      // 5) Extraer un ejemplo de uso:
+      //    a) Intentamos primero un <ul class="ejemplos">
+      let example = null;
       esHeader
-        .nextAll("ol")
+        .nextAll("ul.ejemplos")
         .first()
-        .children("li")
-        .children("ul")
-        .children("li")
+        .find("li")
         .each((i, el) => {
-          const text = $(el).text().trim();
-          if (text && text.split(" ").length > 3) {
-            example = text;
+          const texto = $(el).text().trim();
+          if (texto && texto.split(" ").length > 3) {
+            example = texto;
             return false;
           }
         });
-    }
 
-    // 7) Para pronunciación (IPA) en Wiktionary español:
-    //    Muchas entradas tienen un <span class="IPA"> o <li> bajo "Pronunciación"
-    //    Buscamos dentro de la sección "Pronunciación" (dentro del bloque Español).
-    let ipa = null;
-    // Localizamos la sub-sección 'Pronunciación' dentro de Español
-    const pronHeader = esHeader.nextAll("span#Pronunciación").closest("h3, h4");
-    if (pronHeader.length) {
-      // Tomamos el primer <span class="IPA"> que aparezca debajo
-      const ipaSpan = pronHeader.nextAll(".IPA").first();
-      if (ipaSpan.length) {
-        ipa = ipaSpan.text().trim();
-      } else {
-        // A veces está entre corchetes justo después de la palabra, hacemos un fallback:
-        const fallback = esHeader.nextAll("ul").first().find("li").first().text();
-        // Extraemos patrón /…/ si aparece
-        const match = fallback.match(/\/([^\/]+)\//);
-        if (match) ipa = `/${match[1]}/`;
+      //    b) Si no encotramos <ul class="ejemplos">, buscamos <ul><li> dentro de la definición
+      if (!example) {
+        esHeader
+          .nextAll("ol")
+          .first()
+          .children("li")
+          .children("ul")
+          .children("li")
+          .each((i, el) => {
+            const texto = $(el).text().trim();
+            if (texto && texto.split(" ").length > 3) {
+              example = texto;
+              return false;
+            }
+          });
       }
-    }
 
-    return {
-      meaning: definition || null,
-      example: example || null,
-      ipa: ipa || null
-    };
-  } catch (err) {
-    console.error("Error en fetchWiktionaryEs:", err.message);
-    return null;
+      // 6) Extraer IPA (pronunciación) dentro de la subsección “Pronunciación”
+      let ipa = null;
+      // Buscamos el encabezado “Pronunciación” dentro del bloque “Español”
+      const pronHeader = esHeader.nextAll("span#Pronunciación").closest("h3, h4");
+      if (pronHeader.length) {
+        // Tomamos el primer <span class="IPA"> que siga
+        const ipaSpan = pronHeader.nextAll(".IPA").first();
+        if (ipaSpan.length) {
+          ipa = ipaSpan.text().trim();
+        } else {
+          // Fallback: buscar algo entre barras /…/ en la primera definición
+          const fallback = esHeader.nextAll("ol").first().children("li").first().text();
+          const match = fallback.match(/\/([^\/]+)\//);
+          if (match) {
+            ipa = `/${match[1]}/`;
+          }
+        }
+      }
+
+      return {
+        meaning: meaning || null,
+        example: example || null,
+        ipa: ipa || null
+      };
+    } catch (err) {
+      console.error("Error en _parseEs:", err.message);
+      return null;
+    }
+  };
+
+  // Intento 1: con la palabra tal cual
+  let result = await _parseEs(word);
+  if (result) {
+    return result;
   }
+
+  // Si no encontró nada, intentamos capitalizar la primera letra
+  const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
+  if (capitalized !== word) {
+    result = await _parseEs(capitalized);
+    if (result) {
+      return result;
+    }
+  }
+
+  // Si todavía no encontramos nada, devolvemos null
+  return null;
 }
+
 
 
 /**
