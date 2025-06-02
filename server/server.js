@@ -322,87 +322,128 @@ async function getExampleMultiSource(apiExample, word) {
 }
 
 /**
- * Consulta la página HTML de DLE (RAE) y extrae:
- *  • El significado (primera definición que aparezca)
- *  • Si hay pronunciación (IPA), la extrae del texto
- *  • Un ejemplo (cuando el DLE lo incluya en la definición)
+ * Usa la REST API “mobile-html” de Wiktionary ES para extraer:
+ *   • IPA (tabla .pron-graf)
+ *   • Primera definición (sección “Sustantivo_masculino” o “Verbo” según corresponda)
+ *   • Primer ejemplo anidado (si existe dentro de <ul><li> en la definición)
  *
- * Si no encuentra la palabra en el DLE (404), devuelve null.
+ * Si la palabra no existe (404) o no se logra extraer, devuelve null.
  */
-async function fetchDiccionarioRAE(word) {
+async function fetchWiktionaryEsRest(word) {
   try {
-    // 1) Pedir el HTML de https://dle.rae.es/{word}
-    //    (el DLE suele redirigir automáticamente a su forma correcta, por ejemplo, mayúsculas, acentos, etc.)
-    const url = `https://dle.rae.es/${encodeURIComponent(word)}`;
+    // 1) Llamamos a mobile-html en Wiktionary ES
+    const url = `https://es.wiktionary.org/api/rest_v1/page/mobile-html/${encodeURIComponent(
+      word
+    )}`;
     const response = await axios.get(url, {
-      // Es buena práctica incluir un User-Agent que identifique tu app.
-      headers: { "User-Agent": "AnkiApp/1.0 (ejemplo@localhost)" }
+      headers: {
+        "User-Agent": "AnkiApp/1.0 (tu-email@dominio.com)"
+      }
     });
+    const data = response.data;
 
-    const html = response.data;
-    const $ = cheerio.load(html);
+    // 2) La respuesta incluye `data.lead.html` (la parte superior, con pronunciación, etimología, etc.)
+    //    y `data.remaining.html` (el resto de secciones). Concatenamos ambos fragmentos:
+    const fullHtml = `${data.lead.html}${data.remaining.html || ""}`;
+    const $ = cheerio.load(fullHtml);
 
-    // 2) El DLE estructura la entrada en varias secciones <article>. 
-    //    La definición principal suele estar dentro de <p class="j"> (primer párrafo con texto).
-    //    A veces hay más <p> dentro de <article>, pero el primero suele ser la definición base.
-    const article = $('article'); // toma el primer <article> de la página
-    if (!article.length) {
-      // Si no existe <article>, algo cambió la estructura o no hay entrada
-      return null;
-    }
+    // 3) Extraer IPA de la tabla .pron-graf (la tabla de pronunciación que se ubica junto al título)
+    //    Buscar <table class="pron-graf"> y dentro <span> o directamente el texto ['au.to'], etc.
+    let ipa = null;
+    const pronGraf = $("table.pron-graf");
+    if (pronGraf.length) {
+      // Dentro de la tabla, normalmente está en un <td> que contiene algo como "['au.to']"
+      // Seleccionamos el primer <td> que siga al encabezado de AFI
+      const textoIpa = pronGraf.find("td").filter((i, el) => {
+        const t = $(el).text().trim();
+        // Filtramos aquel <td> cuyo contenido parezca tener corchetes de IPA
+        return /\[.+\]/.test(t);
+      }).first().text().trim();
 
-    // 3) Extraer la primera definición: el primer <p> de clase "j"
-    let meaning = null;
-    const primerParrafo = article.find('p.j').first();
-    if (primerParrafo.length) {
-      // Dentro de este párrafo suelen aparecer la definición y, en ocasiones, un ejemplo entre comillas.
-      // Por ejemplo: “m. Máquina automotriz.…”
-      // Extraemos el texto completo, luego podemos separar el ejemplo si está entre comillas.
-      const textoParrafo = primerParrafo.text().trim();
-      meaning = textoParrafo || null;
-    }
-
-    // 4) Intentar separar un ejemplo si viene entre comillas dobles («…» o “…”).
-    //    Buscamos el primer trozo que esté entre comillas angulares « » o comillas latinas “ ”.
-    let example = null;
-    if (meaning) {
-      // Primero, extraemos texto entre comillas angulares «ejemplo»
-      let match = meaning.match(/«([^»]+)»/);
-      if (match && match[1]) {
-        example = match[1].trim();
-      } else {
-        // Si no hay « », probamos con comillas inglesas “ … ”
-        match = meaning.match(/“([^”]+)”/);
+      if (textoIpa) {
+        // Si viene algo como "['au.to']" o "[ˈar.bol]", nos quedamos solo con el interior
+        const match = textoIpa.match(/\[([^\]]+)\]/);
         if (match && match[1]) {
-          example = match[1].trim();
+          ipa = `/${match[1]}/`;
         }
       }
     }
 
-    // 5) Extraer IPA de la pronunciación, si el DLE la incluye
-    //    El DLE coloca la pronunciación entre corchetes justo después del título, como “[ˈaw.to]”.
-    //    Está dentro de un <span class="micra"> o similar, pero podemos hacer un match en todo el texto:
-    let ipa = null;
-    // Buscamos algo entre corchetes cuadrados, p. ej. “[ˈaw.to]”
-    const textoCompleto = article.text();
-    const mp = textoCompleto.match(/\[([^\]]+)\]/);
-    if (mp && mp[1]) {
-      ipa = mp[1].trim();
-      // Ponemos la barra inclinada /…/ alrededor si lo prefieres:
-      ipa = `/${ipa}/`;
+    // 4) Extraer la primera definición:
+    //    Buscamos la sección de “Sustantivo_masculino” primero. Si no existe, buscamos “Sustantivo_femenino” u otras.
+    //    El HTML de cada sección tiene un <h3 id="Sustantivo_masculino"> y luego, generalmente, un <p> o un <dl><dt><dd>.
+    let meaning = null;
+    // Intentamos encontrar <h3 id="Sustantivo_masculino"> y extraer el primer <dd> de su lista <dl>
+    let sección = $('h3[id="Sustantivo_masculino"]');
+    if (!sección.length) {
+      // Si no hay “Sustantivo_masculino”, quizá sea “Sustantivo_femenino” u otra categoría
+      sección = $('h3[id^="Sustantivo"]').first();
+    }
+    if (sección.length) {
+      // El siguiente <dl> inmediato contendrá <dt> (número de acepción) y <dd> (texto de definición)
+      const dl = sección.nextAll("dl").first();
+      if (dl.length) {
+        // Tomamos el primer <dd> como la definición principal
+        const primeraDd = dl.find("dd").first();
+        if (primeraDd.length) {
+          meaning = primeraDd.text().trim();
+        }
+      }
     }
 
+    // 4.b) Si no encontramos nada en “Sustantivo…”, probamos otras categorías (“Verbo”, “Adjetivo”)
+    if (!meaning) {
+      const posibles = ["Verbo", "Adjetivo", "Adverbio", "Interjección"];
+      for (const cat of posibles) {
+        const hsec = $(`h3[id^="${cat}"]`).first();
+        if (hsec.length) {
+          const dl2 = hsec.nextAll("dl").first();
+          if (dl2.length) {
+            const dd2 = dl2.find("dd").first();
+            if (dd2.length) {
+              meaning = dd2.text().trim();
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // 5) Extraer un ejemplo:
+    //    - Si la definición (primer <dd>) tiene un <ul><li> anidado, tomamos el texto del primer <li>.
+    let example = null;
+    if (meaning) {
+      // Ubicamos de nuevo la misma primera <dd>
+      const primeraDD = sección.nextAll("dl").first().find("dd").first();
+      // Vemos si hay un <ul><li> indenado
+      const liEj = primeraDD.find("ul li").first();
+      if (liEj.length) {
+        example = liEj.text().trim();
+      }
+    }
+
+    // Si no hallamos “example” dentro de la definición, lo dejamos como “Example not found”
+    if (!example) {
+      example = "Example not found";
+    }
+
+    // 6) Si no existe ni IPA ni definición, devolvemos null
+    if (!meaning && !ipa) {
+      return null;
+    }
+
+    // 7) Devolvemos el objeto final
     return {
-      meaning,            // texto completo del primer <p.j>
-      example: example || null,
+      meaning: meaning || null,
+      example,
       ipa: ipa || null
     };
   } catch (err) {
-    // 6) Si la petición devuelve 404 (palabra no existe), axios lanzará error.response.status===404
+    // Si la página no existe (404), axios arroja error.response.status === 404
     if (err.response && err.response.status === 404) {
       return null;
     }
-    console.error("Error en fetchDiccionarioRAE:", err.message);
+    console.error("Error en fetchWiktionaryEsRest:", err.message);
     return null;
   }
 }
@@ -411,15 +452,16 @@ async function fetchDiccionarioRAE(word) {
  * Endpoint para buscar datos de una palabra y obtener IPA, definición y ejemplo multi-fuente.
  */
 console.log('Defining routes...');
-app.get('/search', async (req, res) => {
-  const rawWord = (req.query.word || '').trim();
-  const lang = (req.query.lang || 'en').trim().toLowerCase();
+app.get("/search", async (req, res) => {
+  // 1) Leer parámetros
+  const rawWord = (req.query.word || "").trim();
+  const lang = (req.query.lang || "en").trim().toLowerCase();
 
-  // 1) Validaciones generales
+  // 2) Validaciones
   if (!rawWord) {
-    return res.status(400).json({ error: 'Missing word parameter' });
+    return res.status(400).json({ error: "Missing word parameter" });
   }
-  if (!['en', 'es'].includes(lang)) {
+  if (!["en", "es"].includes(lang)) {
     return res.status(400).json({ error: `Idioma '${lang}' no soportado. Solo 'en' y 'es'.` });
   }
   if (!regexByLang[lang].test(rawWord)) {
@@ -429,47 +471,46 @@ app.get('/search', async (req, res) => {
   }
 
   try {
-    // A) Si es inglés, usar dictionaryapi.dev + getExampleMultiSource (igual que antes)
-    if (lang === 'en') {
+    // 3A) Si es inglés: dictionaryapi.dev + getExampleMultiSource (igual que antes)
+    if (lang === "en") {
       const responseEn = await axios.get(
         `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(rawWord)}`
       );
-      const dataEn = responseEn.data;              // Array con la(s) entrada(s)
-      const parsedEn = parseDictionaryData(dataEn); // tu parser original
+      const dataEn = responseEn.data;              // array de resultados
+      const parsedEn = parseDictionaryData(dataEn); // { ipa, meaning, example }
       if (!parsedEn) {
         return res.status(404).json({
           error: `No se encontró información para '${rawWord}' en inglés.`
         });
       }
-
       let exampleEn = await getExampleMultiSource(parsedEn.example, rawWord);
-      if (!exampleEn) exampleEn = 'Example not found';
+      if (!exampleEn) exampleEn = "Example not found";
 
       return res.json({
         word: rawWord.toLowerCase(),
-        ipa: parsedEn.ipa || '',
-        meaning: parsedEn.meaning || '',
+        ipa: parsedEn.ipa || "",
+        meaning: parsedEn.meaning || "",
         example: exampleEn
       });
     }
 
-    // B) Si es español, llamamos a fetchDiccionarioRAE
-    if (lang === 'es') {
-      const dataEs = await fetchDiccionarioRAE(rawWord);
+    // 3B) Si es español: usamos fetchWiktionaryEsRest
+    if (lang === "es") {
+      const dataEs = await fetchWiktionaryEsRest(rawWord);
       if (!dataEs) {
         return res.status(404).json({
-          error: `No se encontró información para '${rawWord}' en el diccionario de español (DLE).`
+          error: `No se encontró información para '${rawWord}' en el diccionario de español (Wiktionary).`
         });
       }
       return res.json({
         word: rawWord.toLowerCase(),
-        ipa: dataEs.ipa || '',
-        meaning: dataEs.meaning || '',
-        example: dataEs.example || 'Example not found'
+        ipa: dataEs.ipa || "",
+        meaning: dataEs.meaning || "",
+        example: dataEs.example || "Example not found"
       });
     }
   } catch (error) {
-    // Si la petición a dictionaryapi.dev devolvió 404, la manejamos aquí.
+    // 4) Manejo de errores: dictionaryapi.dev (404) o red
     if (error.response && error.response.status === 404) {
       return res.status(404).json({
         error: `La palabra '${rawWord}' no existe en el diccionario de ${lang}.`
