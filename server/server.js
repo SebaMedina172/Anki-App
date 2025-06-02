@@ -322,6 +322,107 @@ async function getExampleMultiSource(apiExample, word) {
 }
 
 /**
+ * Consulta la página de Wiktionary en español y extrae definición y ejemplo.
+ * Si no encuentra nada, devuelve null.
+ */
+async function fetchWiktionaryEs(word) {
+  try {
+    // 1) Llamada a la API de MediaWiki para obtener HTML renderizado de la página
+    const url = `https://es.wiktionary.org/w/api.php?action=parse&page=${encodeURIComponent(
+      word
+    )}&prop=text&format=json`;
+    const response = await axios.get(url, {
+      headers: { "User-Agent": "YourAppName/1.0 (tuemail@ejemplo.com)" }
+    });
+    if (!response.data.parse) return null;
+
+    // 2) HTML completo del artículo de Wiktionary (plantilla de la página)
+    const html = response.data.parse.text["*"];
+    const $ = cheerio.load(html);
+
+    // 3) Buscamos la sección "Español" (span#Español dentro de un <h2> o <h3>)
+    const esHeader = $("span#Español").closest("h2, h3");
+    if (!esHeader.length) return null;
+
+    // 4) A partir de esa cabecera, buscamos el primer <ol> con definiciones
+    //    que venga después de la sección "Español".  
+    //    (En Wiktionary, las definiciones suelen ir en una lista ordenada <ol>)
+    let definition = null;
+    esHeader.nextAll("ol").first().children("li").each((i, el) => {
+      if (i === 0) {
+        // Tomamos el texto de la primera definición
+        definition = $(el).text().trim();
+        return false; // salimos del .each
+      }
+    });
+
+    // 5) Intentar extraer un ejemplo: 
+    //    En Wiktionary las oraciones de ejemplo a veces están en <ul class="ejemplos"> 
+    //    o dentro de la misma <li> de definición en <ul><li>.
+    let example = null;
+    esHeader
+      .nextAll("ul.ejemplos")
+      .first()
+      .find("li")
+      .each((i, el) => {
+        const text = $(el).text().trim();
+        if (text && text.split(" ").length > 3) {
+          example = text;
+          return false;
+        }
+      });
+
+    // 6) Si no hubo lista con clase "ejemplos", revisamos si la propia <li> 
+    //    de definición contenía subconjuntos <ul><li> con ejemplos
+    if (!example) {
+      esHeader
+        .nextAll("ol")
+        .first()
+        .children("li")
+        .children("ul")
+        .children("li")
+        .each((i, el) => {
+          const text = $(el).text().trim();
+          if (text && text.split(" ").length > 3) {
+            example = text;
+            return false;
+          }
+        });
+    }
+
+    // 7) Para pronunciación (IPA) en Wiktionary español:
+    //    Muchas entradas tienen un <span class="IPA"> o <li> bajo "Pronunciación"
+    //    Buscamos dentro de la sección "Pronunciación" (dentro del bloque Español).
+    let ipa = null;
+    // Localizamos la sub-sección 'Pronunciación' dentro de Español
+    const pronHeader = esHeader.nextAll("span#Pronunciación").closest("h3, h4");
+    if (pronHeader.length) {
+      // Tomamos el primer <span class="IPA"> que aparezca debajo
+      const ipaSpan = pronHeader.nextAll(".IPA").first();
+      if (ipaSpan.length) {
+        ipa = ipaSpan.text().trim();
+      } else {
+        // A veces está entre corchetes justo después de la palabra, hacemos un fallback:
+        const fallback = esHeader.nextAll("ul").first().find("li").first().text();
+        // Extraemos patrón /…/ si aparece
+        const match = fallback.match(/\/([^\/]+)\//);
+        if (match) ipa = `/${match[1]}/`;
+      }
+    }
+
+    return {
+      meaning: definition || null,
+      example: example || null,
+      ipa: ipa || null
+    };
+  } catch (err) {
+    console.error("Error en fetchWiktionaryEs:", err.message);
+    return null;
+  }
+}
+
+
+/**
  * Endpoint para buscar datos de una palabra y obtener IPA, definición y ejemplo multi-fuente.
  */
 console.log('Defining routes...');
@@ -330,96 +431,108 @@ app.get('/search', async (req, res) => {
   const rawWord = (req.query.word || '').trim();
   const lang = (req.query.lang || 'en').trim().toLowerCase();
 
-  // 2) Validar que envíe palabra y que el idioma sea soportado (solo 'en' o 'es')
+  // 2) Validar entrada mínima
   if (!rawWord) {
     return res.status(400).json({ error: 'Missing word parameter' });
   }
   if (!['en', 'es'].includes(lang)) {
-    return res.status(400).json({ error: `Idioma '${lang}' no soportado. Solo 'en' y 'es'.` });
+    return res.status(400).json({
+      error: `Idioma '${lang}' no soportado. Por ahora solo 'en' y 'es'.`
+    });
   }
-
-  // 3) Validación básica con regex: la palabra debe cumplir el charset del idioma
   if (!regexByLang[lang].test(rawWord)) {
-    return res
-      .status(400)
-      .json({ error: `La palabra '${rawWord}' no es válida para el idioma '${lang}'.` });
-  }
-
-  // 4) Determinar URL del diccionario según idioma
-  let apiUrl;
-  switch (lang) {
-    case 'en':
-      apiUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${rawWord}`;
-      break;
-    case 'es':
-      apiUrl = `https://api.dictionaryapi.dev/api/v2/entries/es/${rawWord}`;
-      break;
+    return res.status(400).json({
+      error: `La palabra '${rawWord}' no es válida para el idioma '${lang}'.`
+    });
   }
 
   try {
-    // 5) Hacer la petición a dictionaryapi.dev
-    const response = await axios.get(apiUrl);
-    const data = response.data;                     // Array de entradas, formato JSON de dictionaryapi.dev
-    const parsed = parseDictionaryData(data);       // parseDictionaryData funciona igual para en/​es
+    let parsed = null;
+    // 3) Si es inglés, usamos dictionaryapi.dev + getExampleMultiSource
+    if (lang === 'en') {
+      // Llamada a DictionaryAPI en inglés
+      const responseEn = await axios.get(
+        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(rawWord)}`
+      );
+      const dataEn = responseEn.data;                   // Array de resultados
+      parsed = parseDictionaryData(dataEn);             // { ipa, meaning, example }
+      if (!parsed) {
+        return res.status(404).json({
+          error: `No se encontró información para '${rawWord}' en inglés.`
+        });
+      }
 
-    // 6) Si no se pudo extraer (ej. la API devolvió 404 o la estructura cambió)
-    if (!parsed) {
-      return res.status(404).json({
-        error: `No se encontró información para '${rawWord}' en el diccionario de ${lang}.`
+      // Ejemplo multi-fuente (API → Linguee → Tatoeba)
+      let exampleEn = await getExampleMultiSource(parsed.example, rawWord);
+      if (!exampleEn) exampleEn = 'Example not found';
+
+      return res.json({
+        word: rawWord.toLowerCase(),
+        ipa: parsed.ipa || '',
+        meaning: parsed.meaning || '',
+        example: exampleEn
       });
     }
 
-    // 7) Obtener ‘example’:
-    //  - Si es inglés: uso tu getExampleMultiSource (API → Linguee → Tatoeba)
-    //  - Si es español: tomo directamente el ejemplo que devolvió dictionaryapi.dev (parsed.example),
-    //    o “Example not found” si no existe.
-    let exampleToSend = parsed.example || null;
-    if (lang === 'en') {
-      exampleToSend = await getExampleMultiSource(parsed.example, rawWord);
+    // 4) Si es español, usamos Wiktionary
+    if (lang === 'es') {
+      const wikiData = await fetchWiktionaryEs(rawWord);
+      if (!wikiData || (!wikiData.meaning && !wikiData.example && !wikiData.ipa)) {
+        return res.status(404).json({
+          error: `No se encontró información para '${rawWord}' en el diccionario de español.`
+        });
+      }
+      // Aseguramos que al menos vengan campos vacíos, nunca undefined
+      return res.json({
+        word: rawWord.toLowerCase(),
+        ipa: wikiData.ipa || '',
+        meaning: wikiData.meaning || '',
+        example: wikiData.example || 'Example not found'
+      });
     }
-    if (!exampleToSend) {
-      exampleToSend = 'Example not found';
-    }
-
-    // 8) Devolver JSON uniforme
-    return res.json({
-      word: rawWord.toLowerCase(),
-      ipa: parsed.ipa || '',         // en español /inglés, parsed.ipa viene de parseDictionaryData
-      meaning: parsed.meaning || '',
-      example: exampleToSend
-    });
   } catch (error) {
-    // 9) Manejo de errores:
-    //    - Si la API devolvió 404 directamente (palabra no existe en ese idioma)
+    // 5) Manejo de errores puntuales
+    //    - Si dictionaryapi.dev devolvió 404
     if (error.response && error.response.status === 404) {
       return res.status(404).json({
         error: `La palabra '${rawWord}' no existe en el diccionario de ${lang}.`
       });
     }
-    //    - Cualquier otro error de red / inesperado
     console.error(`Error en /search [${lang}]:`, error.message);
     return res.status(500).json({ error: error.toString() });
   }
 });
 
+
 // ======= Preview endpoint: Retorna 5 imagenes con su URL's =======
 app.get('/search-image', async (req, res) => {
-  const query = req.query.query;
-  if (!query) return res.status(400).json({ error: 'Missing query parameter' });
+  const query = (req.query.query || '').trim();
+  const lang = (req.query.lang || 'en').trim().toLowerCase();
+
+  if (!query) {
+    return res.status(400).json({ error: 'Missing query parameter' });
+  }
+  if (!['en', 'es'].includes(lang)) {
+    return res.status(400).json({
+      error: `Idioma '${lang}' no soportado para búsqueda de imágenes.`
+    });
+  }
+
   try {
     const apiKey = process.env.PIXABAY_API_KEY;
-    const resp = await axios.get('https://pixabay.com/api/', {
-      params: { key: apiKey, q: query, per_page: 5, image_type: 'photo', safesearch: true }
+    // Nota: podrías traducir el query (“perro” → “dog”) si quisieras resultados en 
+    // inglés, pero aquí dejamos la palabra tal cual
+    const resp = await axios.get("https://pixabay.com/api/", {
+      params: { key: apiKey, q: query, per_page: 5, image_type: "photo", safesearch: true }
     });
-    // send array of preview URLs and full URLs
-    const images = resp.data.hits.map(hit => ({
+    const images = resp.data.hits.map((hit) => ({
       id: hit.id,
       previewURL: hit.previewURL,
-      fullURL: hit.largeImageURL || hit.webformatURL
+      fullURL: hit.largeImageURL || hit.webformatURL,
     }));
     res.json({ images });
   } catch (error) {
-    console.error('Error in GET /search-image:', error.message);
+    console.error("Error in GET /search-image:", error.message);
     res.status(500).json({ error: error.toString() });
   }
 });
