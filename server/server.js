@@ -332,6 +332,7 @@ async function getExampleMultiSource(apiExample, word) {
 async function fetchWiktionaryEsRest(word) {
   try {
     // 1) Llamamos a mobile-html en Wiktionary ES
+    print("This is the encodeURIComponent word:", encodeURIComponent(word))
     const url = `https://es.wiktionary.org/api/rest_v1/page/mobile-html/${encodeURIComponent(
       word
     )}`;
