@@ -383,7 +383,7 @@ async function fetchWiktionaryEsRest(word) {
     // ===== EXTRAER IPA =====
     let ipa = extractIPA($);
     
-    // ===== EXTRAER SIGNIFICADO =====
+    // ===== EXTRAER SIGNIFICADO CON NUEVO MÉTODO =====
     let meaning = extractMeaning($, word);
     
     console.log('Resultado extraído:', { 
@@ -479,57 +479,233 @@ function extractIPA($) {
 }
 
 /**
- * Extrae significado de manera muy flexible
+ * Extrae significado siguiendo la estructura específica de Wiktionary ES:
+ * section > h3/h4 (tipo de palabra) > dl > dd (definición)
  */
 function extractMeaning($, word) {
-  console.log('Extrayendo significado...');
+  console.log('Extrayendo significado con nuevo método...');
   
-  // Lista de posibles headers de sección (h2, h3, h4, h5)
-  const sectionHeaders = [
-    // Sustantivos
-    'h2[id*="Sustantivo"], h3[id*="Sustantivo"], h4[id*="Sustantivo"], h5[id*="Sustantivo"]',
-    // Verbos
-    'h2[id*="Verbo"], h3[id*="Verbo"], h4[id*="Verbo"], h5[id*="Verbo"]',
-    // Adjetivos
-    'h2[id*="Adjetivo"], h3[id*="Adjetivo"], h4[id*="Adjetivo"], h5[id*="Adjetivo"]',
-    // Pronombres
-    'h2[id*="Pronombre"], h3[id*="Pronombre"], h4[id*="Pronombre"], h5[id*="Pronombre"]',
-    // Adverbios
-    'h2[id*="Adverbio"], h3[id*="Adverbio"], h4[id*="Adverbio"], h5[id*="Adverbio"]',
-    // Interjecciones
-    'h2[id*="Interjección"], h3[id*="Interjección"], h4[id*="Interjección"], h5[id*="Interjección"]',
-    // Preposiciones
-    'h2[id*="Preposición"], h3[id*="Preposición"], h4[id*="Preposición"], h5[id*="Preposición"]',
-    // Conjunciones
-    'h2[id*="Conjunción"], h3[id*="Conjunción"], h4[id*="Conjunción"], h5[id*="Conjunción"]'
-  ];
+  // Primero, buscar todas las secciones que contengan información de palabras
+  const sections = $('section');
+  console.log(`Encontradas ${sections.length} secciones`);
   
-  // Intentar cada tipo de sección
-  for (const headerSelector of sectionHeaders) {
-    try {
-      const headers = $(headerSelector);
-      console.log(`Probando selector: ${headerSelector}, encontrados: ${headers.length}`);
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections.eq(i);
+    console.log(`\n--- Analizando sección ${i + 1} ---`);
+    
+    // Buscar headers h3 y h4 dentro de la sección
+    const headers = section.find('h3, h4');
+    console.log(`  Headers encontrados en sección: ${headers.length}`);
+    
+    for (let j = 0; j < headers.length; j++) {
+      const header = headers.eq(j);
+      const headerText = header.text().trim();
+      console.log(`    Analizando header: "${headerText}"`);
       
-      for (let i = 0; i < headers.length; i++) {
-        const header = headers.eq(i);
-        const headerText = header.text().trim();
-        console.log(`  Analizando header: "${headerText}"`);
+      // Verificar si es un tipo de palabra (sustantivo, verbo, etc.)
+      if (isWordTypeHeader(headerText)) {
+        console.log(`    ✓ Es un tipo de palabra válido`);
         
-        const meaning = extractMeaningFromSection($, header);
-        if (meaning && meaning.length > 3) { // Al menos 3 caracteres
-          console.log(`  Significado encontrado: "${meaning.substring(0, 50)}..."`);
+        // Buscar dl que sigue al header
+        const meaning = extractDefinitionFromHeader($, header);
+        if (meaning && meaning.length > 3) {
+          console.log(`    ✓ Definición encontrada: "${meaning.substring(0, 100)}..."`);
           return meaning;
         }
       }
-    } catch (e) {
-      console.log(`Error con selector de header "${headerSelector}":`, e.message);
     }
   }
   
-  // Si no encontramos nada con headers específicos, búsqueda más amplia
-  console.log('Búsqueda amplia de definiciones...');
-  return extractMeaningBroadSearch($);
+  // Si no encontramos nada en las secciones, hacer búsqueda alternativa
+  console.log('\nBúsqueda alternativa fuera de secciones...');
+  return extractMeaningAlternative($);
 }
+
+/**
+ * Búsqueda alternativa cuando falla el método principal
+ */
+function extractMeaningAlternative($) {
+  console.log('Aplicando método alternativo...');
+  
+  // Buscar cualquier dl > dd que contenga una definición válida
+  const allDLs = $('dl');
+  console.log(`  Total de elementos dl encontrados: ${allDLs.length}`);
+  
+  for (let i = 0; i < allDLs.length; i++) {
+    const dl = allDLs.eq(i);
+    const definition = extractFromDL($, dl);
+    
+    if (definition && definition.length > 10) {
+      // Verificar que no sea metadata o información irrelevante
+      if (!isMetadataText(definition)) {
+        console.log(`  ✓ Definición alternativa encontrada: "${definition.substring(0, 50)}..."`);
+        return definition;
+      }
+    }
+  }
+  
+  // Último recurso: buscar en cualquier dd
+  const allDDs = $('dd');
+  console.log(`  Total de elementos dd encontrados: ${allDDs.length}`);
+  
+  for (let i = 0; i < allDDs.length; i++) {
+    const dd = allDDs.eq(i);
+    const text = extractTextFromDD($, dd);
+    
+    if (text && text.length > 10 && !isMetadataText(text)) {
+      console.log(`  ✓ Definición en dd encontrada: "${text.substring(0, 50)}..."`);
+      return text;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Verifica si un texto es metadata o información irrelevante
+ */
+function isMetadataText(text) {
+  const metadataPatterns = [
+    /mw-parser-output/i,
+    /\{\{.*\}\}/,
+    /^[A-Z][a-z]{0,3}\.?$/,  // Como "Sus.", "Adj."
+    /Referencias/i,
+    /Véase también/i,
+    /Etimología/i,
+    /Pronunciación/i
+  ];
+  
+  return metadataPatterns.some(pattern => pattern.test(text));
+}
+
+/**
+ * Verifica si un header corresponde a un tipo de palabra
+ */
+function isWordTypeHeader(headerText) {
+  const wordTypes = [
+    // Sustantivos
+    'sustantivo', 'sustantivo masculino', 'sustantivo femenino', 'sustantivo común',
+    // Verbos  
+    'verbo', 'verbo transitivo', 'verbo intransitivo', 'verbo pronominal',
+    // Adjetivos
+    'adjetivo', 'adjetivo calificativo', 'adjetivo relacional',
+    // Otros
+    'adverbio', 'pronombre', 'interjección', 'preposición', 'conjunción',
+    'artículo', 'numeral', 'determinante'
+  ];
+  
+  const lowerText = headerText.toLowerCase();
+  return wordTypes.some(type => lowerText.includes(type));
+}
+
+/**
+ * Extrae la definición siguiendo la estructura: header > dl > dd
+ */
+function extractDefinitionFromHeader($, header) {
+  console.log(`      Buscando definición para header: "${header.text()}"`);
+  
+  // Estrategia 1: Buscar dl inmediatamente después del header
+  let current = header.next();
+  let attempts = 0;
+  
+  while (current.length && attempts < 5) {
+    attempts++;
+    console.log(`        Intento ${attempts}: Elemento actual: ${current.prop('tagName')}`);
+    
+    if (current.is('dl')) {
+      const definition = extractFromDL($, current);
+      if (definition) {
+        console.log(`        ✓ Definición encontrada en dl directo`);
+        return definition;
+      }
+    }
+    
+    // Si no es dl, buscar dl dentro del elemento actual
+    const dlInside = current.find('dl');
+    if (dlInside.length) {
+      const definition = extractFromDL($, dlInside.first());
+      if (definition) {
+        console.log(`        ✓ Definición encontrada en dl interno`);
+        return definition;
+      }
+    }
+    
+    current = current.next();
+  }
+  
+  // Estrategia 2: Buscar en el mismo nivel o en elementos hermanos
+  const parentSection = header.closest('section');
+  if (parentSection.length) {
+    const dlInSection = parentSection.find('dl');
+    for (let i = 0; i < dlInSection.length; i++) {
+      const dl = dlInSection.eq(i);
+      const definition = extractFromDL($, dl);
+      if (definition) {
+        console.log(`        ✓ Definición encontrada en dl de sección`);
+        return definition;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extrae texto de un elemento dl > dd
+ */
+function extractFromDL($, dlElement) {
+  const ddElements = dlElement.find('dd');
+  console.log(`          Elementos dd encontrados: ${ddElements.length}`);
+  
+  for (let i = 0; i < ddElements.length; i++) {
+    const dd = ddElements.eq(i);
+    let text = extractTextFromDD($, dd);
+    
+    if (text && text.length > 3) {
+      console.log(`          ✓ Texto extraído de dd: "${text.substring(0, 50)}..."`);
+      return text;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extrae texto de un elemento dd, manejando links y spans internos
+ */
+function extractTextFromDD($, ddElement) {
+  // Primero intentar obtener el texto completo
+  let text = ddElement.text().trim();
+  
+  // Si está vacío o muy corto, intentar estrategias específicas
+  if (!text || text.length < 3) {
+    // Buscar en spans internos
+    const spans = ddElement.find('span');
+    for (let i = 0; i < spans.length; i++) {
+      const spanText = spans.eq(i).text().trim();
+      if (spanText && spanText.length > 3) {
+        text = spanText;
+        break;
+      }
+    }
+    
+    // Si aún no hay texto, buscar en elementos a (links)
+    if (!text || text.length < 3) {
+      const links = ddElement.find('a');
+      for (let i = 0; i < links.length; i++) {
+        const linkText = links.eq(i).text().trim();
+        if (linkText && linkText.length > 3) {
+          text = linkText;
+          break;
+        }
+      }
+    }
+  }
+  
+  // Limpiar el texto
+  return cleanMeaningText(text);
+}
+
 
 /**
  * Extrae significado de una sección específica
@@ -620,22 +796,25 @@ function extractMeaningBroadSearch($) {
  * Limpia el texto del significado
  */
 function cleanMeaningText(text) {
-  if (!text) return null;
+  if (!text || typeof text !== 'string') return null;
   
   // Limpiezas básicas
   text = text.trim();
   
-  // Remover patrones problemáticos
+  // Remover patrones problemáticos específicos de Wiktionary
   text = text.replace(/\.mw-parser-output[^.]*\./g, '');
-  text = text.replace(/Sus\./g, ''); // "Sus." no es una definición útil
+  text = text.replace(/\{\{[^}]*\}\}/g, ''); // Remover templates de MediaWiki
+  text = text.replace(/\[[^\]]*\]/g, ''); // Remover referencias [1], [2], etc.
+  text = text.replace(/Sus\./g, '');
   text = text.replace(/Ejemplo:[^.]*\./g, '');
-  text = text.replace(/\s+/g, ' ');
+  text = text.replace(/\s+/g, ' '); // Normalizar espacios
+  text = text.replace(/^\d+\.?\s*/, ''); // Remover numeración al inicio
+  
+  // Limpiar caracteres extraños
+  text = text.replace(/[^\w\sáéíóúüñÁÉÍÓÚÜÑ.,;:()¿?¡!-]/g, '');
   
   // Si es muy corto o contiene patrones problemáticos, descartarlo
-  if (text.length < 3 || 
-      text.includes('mw-parser-output') || 
-      text.includes('blockquote') ||
-      /^[A-Z][a-z]{0,2}\.?$/.test(text)) { // Como "Sus."
+  if (text.length < 5 || isMetadataText(text)) {
     return null;
   }
   
