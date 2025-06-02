@@ -10,6 +10,11 @@ const multer = require('multer');
 const cheerio   = require('cheerio');      // <— para getExampleFromLinguee
 const puppeteer = require('puppeteer');    // <— para getExampleFromTatoeba
 const googleTTS = require('google-tts-api');
+import translate from '@vitalets/google-translate-api';
+import keywordExtractor from 'keyword-extractor';
+
+const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
+
 
 // ============================================
 //  Regex mínimos para validar “word” según idioma
@@ -1266,34 +1271,104 @@ app.get("/search", async (req, res) => {
 
 // ======= Preview endpoint: Retorna 5 imagenes con su URL's =======
 app.get('/search-image', async (req, res) => {
-  const query = (req.query.query || '').trim();
+  let query = (req.query.query || '').trim();    // Ej: "niño corriendo en el parque"
   const lang = (req.query.lang || 'en').trim().toLowerCase();
 
   if (!query) {
     return res.status(400).json({ error: 'Missing query parameter' });
   }
   if (!['en', 'es'].includes(lang)) {
-    return res.status(400).json({
-      error: `Idioma '${lang}' no soportado para búsqueda de imágenes.`
-    });
+    return res
+      .status(400)
+      .json({ error: `Idioma '${lang}' no soportado.` });
   }
 
   try {
-    const apiKey = process.env.PIXABAY_API_KEY;
-    // Nota: podrías traducir el query (“perro” → “dog”) si quisieras resultados en 
-    // inglés, pero aquí dejamos la palabra tal cual
-    const resp = await axios.get("https://pixabay.com/api/", {
-      params: { key: apiKey, q: query, per_page: 5, image_type: "photo", safesearch: true }
+    // 1) Extraer keywords del texto en su propio idioma
+    const extractorConfig = {
+      language:             lang === 'es' ? 'spanish' : 'english',
+      remove_digits:        true,
+      return_changed_case:  true,
+      remove_duplicates:    true,
+    };
+    // keywordExtractor.extract devuelve un array de strings
+    const allKeywords = keywordExtractor.extract(query, extractorConfig);
+    // Tomamos sólo las primeras 4 para no saturar la traducción
+    const topKeywords = allKeywords.slice(0, 4); 
+    // Ej: ["niño", "corriendo", "parque"]
+
+    // 2) Si estamos en español, traducir cada palabra al inglés
+    let keywordsEn = [];
+    if (lang === 'es') {
+      // Traducimos palabra por palabra para tener términos simples en inglés
+      const promises = topKeywords.map((palabraEs) => 
+        translate(palabraEs, { to: 'en' })
+          .then((r) => {
+            // Normalizamos a minúsculas y quitamos caracteres no alfabéticos
+            return r.text.toLowerCase().replace(/[^a-z]/g, '');
+          })
+          .catch((e) => {
+            console.warn(`No se pudo traducir "${palabraEs}":`, e);
+            return '';
+          })
+      );
+      const translatedArr = await Promise.all(promises);
+      // Filtramos cadenas vacías
+      keywordsEn = translatedArr.filter((w) => w.length > 0);
+    } else {
+      // Si ya está en inglés, usamos las mismas topKeywords
+      keywordsEn = topKeywords;
+    }
+
+    // 3) Construir la query final para Pixabay
+    let finalQuery = '';
+    if (keywordsEn.length > 0) {
+      finalQuery = keywordsEn.join(' ');
+    } else {
+      // Si no se extrajo nada, usamos el texto original (aunque puede ser muy largo)
+      finalQuery = query;
+    }
+
+    console.log('[search-image] Query para Pixabay:', finalQuery);
+
+    // 4) Llamar a Pixabay (buscando siempre en inglés porque sus etiquetas
+    //    funcionan mejor así)
+    const pixabayResp = await axios.get('https://pixabay.com/api/', {
+      params: {
+        key:        PIXABAY_API_KEY,
+        q:          finalQuery,
+        per_page:   5,
+        image_type: 'photo',
+        safesearch: true,
+        lang:       'en',
+      },
     });
-    const images = resp.data.hits.map((hit) => ({
-      id: hit.id,
-      previewURL: hit.previewURL,
-      fullURL: hit.largeImageURL || hit.webformatURL,
-    }));
-    res.json({ images });
+
+    const hits = pixabayResp.data.hits || [];
+    let images = [];
+
+    if (hits.length === 0) {
+      // Si no hubo resultados, devolvemos un placeholder
+      images = [
+        {
+          id: -1,
+          previewURL: `https://via.placeholder.com/300x200?text=${encodeURIComponent(finalQuery)}`,
+          fullURL:    `https://via.placeholder.com/300x200?text=${encodeURIComponent(finalQuery)}`,
+        },
+      ];
+    } else {
+      // Mapear los primeros 5 hits al formato que espera el front
+      images = hits.map((hit) => ({
+        id:         hit.id,
+        previewURL: hit.previewURL,
+        fullURL:    hit.largeImageURL || hit.webformatURL,
+      }));
+    }
+
+    return res.json({ images });
   } catch (error) {
-    console.error("Error in GET /search-image:", error.message);
-    res.status(500).json({ error: error.toString() });
+    console.error('Error en /search-image:', error);
+    return res.status(500).json({ error: 'Internal error fetching images' });
   }
 });
 
