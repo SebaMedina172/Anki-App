@@ -10,8 +10,8 @@ const multer = require('multer');
 const cheerio   = require('cheerio');      // <— para getExampleFromLinguee
 const puppeteer = require('puppeteer');    // <— para getExampleFromTatoeba
 const googleTTS = require('google-tts-api');
-import translate from '@vitalets/google-translate-api';
-import keywordExtractor from 'keyword-extractor';
+const translate = require('@vitalets/google-translate-api');
+const keywordExtractor = require('keyword-extractor');
 
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 
