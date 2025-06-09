@@ -144,7 +144,7 @@ export default function HelpGuide({ selectedLanguage = "en" }: HelpGuideProps) {
               }}
             >
               {`"webCorsOriginList": [
-          "https://anki-app-sm.vercel.app/",
+          "https://anki-app-sm.vercel.app",
           "http://localhost"
         ]`}
             </pre>

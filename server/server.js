@@ -61,7 +61,7 @@ const app = express();
 
 // CORS configuration: allow frontend origin
 const corsOptions = {
-  origin: 'https://anki-app-sm.vercel.app/', // change to '*' if needed for testing
+  origin: 'https://anki-app-sm.vercel.app', // change to '*' if needed for testing
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-anki-url']
 };
