@@ -1,9 +1,25 @@
-# Node.js
+# Dependencias instaladas
 node_modules/
-dist/
 
-# Vite
-.vite/
+# Archivos de lock (si usas npm o pnpm)
+package-lock.json
+pnpm-lock.yaml
 
-# Otros
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+
+# Archivos de build / output
+/.next/
+/out/
+/build/
+/dist/
+
+# Cachés del sistema y editores
 .DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.vscode/
+.idea/

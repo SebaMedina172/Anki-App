@@ -1,438 +1,287 @@
-import React, { useState, useEffect } from 'react';
+"use client"
+import { useState, useEffect } from "react"
 import {
   Container,
-  Stack,
-  Typography,
-  TextField,
-  Button,
   Box,
   Snackbar,
   Alert,
-  CircularProgress,
-  Autocomplete,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   IconButton,
   CssBaseline,
   createTheme,
   ThemeProvider,
-} from '@mui/material';
-import SearchIcon from '@mui/icons-material/Search';
-import SettingsIcon from '@mui/icons-material/Settings';
-import Brightness4Icon from '@mui/icons-material/Brightness4';
-import Brightness7Icon from '@mui/icons-material/Brightness7';
-import { GlobalStyles } from '@mui/material';
-import * as stopword from 'stopword';
+  Typography,
+} from "@mui/material"
+import Brightness4Icon from "@mui/icons-material/Brightness4"
+import Brightness7Icon from "@mui/icons-material/Brightness7"
+import { GlobalStyles } from "@mui/material"
 
-// Importa el componente de ayuda
-import HelpGuide from './components/HelpGuide';
+// Importaciones de componentes
+import HelpGuide from "./components/HelpGuide"
+import { ConfigurationSection } from "./components/ConfigurationSection"
+import { SearchSection } from "./components/SearchSection"
+import { LabelsSection } from "./components/LabelsSection"
+import { ImageModal } from "./components/ImageModal"
 
-<GlobalStyles styles={{
-  body: {
-    transition: 'background-color 0.3s ease, color 0.3s ease',
-  },
-}} />
+// Importaciones de hooks personalizados
+import { useAnkiConnect } from "./hooks/useAnkiConnect"
+import { useImageSearch } from "./hooks/useImageSearch"
+import { useWordSearch } from "./hooks/useWordSearch"
+import { useTranslation } from "./hooks/useTranslation"
 
-interface ImageSuggestion {
-  previewURL: string;
-  fullURL: string;
-}
+// Importaciones de tipos y utilidades
+import type { Label, SnackbarState, ImageSuggestion } from "./types"
+import { getTTSUrl, loadConfigFromStorage, saveConfigToStorage, isBrowser, getApiUrl } from "./utils"
+;<GlobalStyles
+  styles={{
+    body: {
+      transition: "background-color 0.3s ease, color 0.3s ease",
+    },
+  }}
+/>
 
-interface Label {
-  id: number;
-  text: string;
-  ipa: string;
-  meaning: string;
-  example: string;
-  isEditing: boolean;
-  imageSuggestions: ImageSuggestion[];  // URLs sugeridas para esta etiqueta
-  selectedImage: ImageSuggestion | null; // URL de la imagen elegida para esta etiqueta
-  refreshPage?: number;          // Página actual para la búsqueda de imágenes
-}
-
+/**
+ * Componente principal de la aplicación Anki Card Generator
+ * Gestiona el estado global y coordina todos los componentes
+ */
 function App() {
-  // Estados de configuración (se cargan de localStorage si existen)
-  const [deck, setDeck] = useState(localStorage.getItem('deck') || '');
-  const [model, setModel] = useState(localStorage.getItem('model') || '');
-  const [ankiConnectUrl, setAnkiConnectUrl] = useState(localStorage.getItem('ankiConnectUrl') || '');
-  const [selectedLanguage, setSelectedLanguage] = useState(localStorage.getItem('selectedLanguage') || 'en');
-  const [ankiConnectError, setAnkiConnectError] = useState<string | null>(null);
+  // Estados de configuración inicializados con valores por defecto
+  const [deck, setDeck] = useState("")
+  const [model, setModel] = useState("")
+  const [ankiConnectUrl, setAnkiConnectUrl] = useState("")
+  const [selectedLanguage, setSelectedLanguage] = useState("en")
 
-  // Nuevos estados para decks y modelos disponibles
-  const [availableDecks, setAvailableDecks] = useState<string[]>([]);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [isFetchingOptions, setIsFetchingOptions] = useState(false);
+  // Estados principales de la aplicación
+  const [labels, setLabels] = useState<Label[]>([])
+  const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: "", severity: "success" })
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingLabelId, setProcessingLabelId] = useState<number | null>(null)
+  const [darkMode, setDarkMode] = useState(false)
 
-  const [searchWord, setSearchWord] = useState('');
-  const [searchError, setSearchError] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('');
-  const [labels, setLabels] = useState<Label[]>([]);
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingLabelId, setProcessingLabelId] = useState<number | null>(null);
+  // Hooks personalizados
+  const { availableDecks, availableModels, isFetchingOptions, ankiConnectError, fetchDecksAndModels } =
+    useAnkiConnect(selectedLanguage)
+  const { openImageModalLabelId, setOpenImageModalLabelId, fetchImageSuggestionsForLabel } = useImageSearch()
+  const { searchWord, searchError, loadingMessage, handleSearchChange, handleSearch } = useWordSearch(selectedLanguage)
+  const { t } = useTranslation(selectedLanguage)
 
-  //Estados para busqueda y seleccion de imagenes
-  // const [imageSuggestions, setImageSuggestions] = useState<string[]>([]);
-  // const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  // const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-  const [openImageModalLabelId, setOpenImageModalLabelId] = useState<number | null>(null);
+  // Cargar configuración desde localStorage solo en el cliente
+  useEffect(() => {
+    if (isBrowser) {
+      const config = loadConfigFromStorage()
+      setDeck(config.deck)
+      setModel(config.model)
+      setAnkiConnectUrl(config.ankiConnectUrl)
+      setSelectedLanguage(config.selectedLanguage)
+    }
+  }, [])
 
-
-  const [darkMode, setDarkMode] = useState(false);
-
+  // Configuración del tema
   const theme = createTheme({
     palette: {
-      mode: darkMode ? 'dark' : 'light',
+      mode: darkMode ? "dark" : "light",
       background: {
-        default: darkMode ? '#212121' : '#f7f7f7',
-        paper: darkMode ? '#424242' : '#dbdbdb',
+        default: darkMode ? "#212121" : "#f7f7f7",
+        paper: darkMode ? "#424242" : "#dbdbdb",
       },
       primary: {
-        main: '#1976d2',
+        main: "#1976d2",
       },
     },
-  });
+  })
 
-  const getTTSUrl = (text: string, lang: string = 'en') => {
-    return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
-  };
-  
-
-  const fetchDecksAndModels = async (url: string) => {
-    setIsFetchingOptions(true);
-    try {
-      setAnkiConnectError(null);
-  
-      // 1) Decks
-      const deckResponse = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'deckNames', version: 6 }),
-      });
-      const deckData = await deckResponse.json();
-      if (deckData.error) throw new Error(deckData.error);
-      const decks = deckData.result;
-  
-      // 2) Modelos
-      const modelResponse = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'modelNames', version: 6 }),
-      });
-      const modelData = await modelResponse.json();
-      if (modelData.error) throw new Error(modelData.error);
-      const models = modelData.result;
-  
-      setAvailableDecks(decks);
-      setAvailableModels(models);
-    } catch (error) {
-      console.error('Error al obtener decks/modelos:', error);
-      const errMsg = error instanceof Error ? error.message : String(error);
-      setAnkiConnectError(
-        errMsg.includes('ECONNREFUSED')
-          ? 'Anki no está abierto. Por favor, abre Anki.'
-          : 'URL incorrecta o AnkiConnect no responde.'
-      );
-      setAvailableDecks([]);
-      setAvailableModels([]);
-      setSnackbar({ open: true, message: `Error: ${errMsg}`, severity: 'error' });
-    } finally {
-      setIsFetchingOptions(false);
-    }
-  };
-
-  // Al cargar la app, si ya hay URL, intenta cargar decks y modelos
+  // Efecto para cargar decks y modelos al cambiar la URL de AnkiConnect
   useEffect(() => {
     if (ankiConnectUrl) {
-      fetchDecksAndModels(ankiConnectUrl);
+      fetchDecksAndModels(ankiConnectUrl)
     }
-  }, [ankiConnectUrl]);
+  }, [ankiConnectUrl])
 
-  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchWord(event.target.value);
-    setSearchError(false);
-  };
-
-  
-  const extractKeywords = (text: string, lang: string = 'en'): string => {
-    // Divide el texto en palabras
-    const words = text.split(' ');
-    // Obtiene la lista de stopwords para el idioma solicitado.
-    // La librería stopword tiene propiedades para "en", "es", etc.
-    // Si no existe para el idioma, por defecto se usa 'en'.
-    const stopwords = stopword[lang as keyof typeof stopword] || stopword.eng;
-    const customStopwords: string[] = stopwords as string[];
-    // Filtra y retorna un string con las palabras clave.
-    return stopword.removeStopwords(words, customStopwords).join(' ');
-  };
-
-  // Función para buscar imágenes para una etiqueta específica
-  const fetchImageSuggestionsForLabel = async (labelId: number, word: string, example: string, meaning: string, lang = 'en', page = 1) => {
-    try {
-      const baseText = example.toLowerCase().includes("example not found")
-        ? extractKeywords(meaning, lang)
-        : extractKeywords(example, lang);
-      let query = `${word} ${baseText}`.trim();
-  
-      // helper para llamar al backend
-      const doFetch = async (q: string) => {
-        const randomParam = Math.random().toString(36).substring(2, 8);
-        const url = `${import.meta.env.VITE_API_URL}/search-image?query=${encodeURIComponent(q)}&page=${page}&r=${randomParam}`;
-        const resp = await fetch(url);
-        return resp.json();
-      };
-  
-      // 2) primer intento
-      let data = await doFetch(query);
-  
-      // 3) fallback a icon
-      if (data.error || !data.images?.length) {
-        data = await doFetch(`${word} icon`);
-      }
-      // 4) fallback a illustration
-      if (data.error || !data.images?.length) {
-        data = await doFetch(`${word} illustration`);
-      }
-      // 5) fallback placeholder
-      if (data.error || !data.images?.length) {
-        data = {
-          images: [{
-            previewURL: `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`,
-            fullURL:   `https://via.placeholder.com/300x200?text=${encodeURIComponent(word)}`
-          }]
-        };
-      }
-      const suggestions: ImageSuggestion[] = data.images;
-  
-      // 6) actualiza el estado con objetos ImageSuggestion
-      setLabels(prev =>
-      prev.map(lbl =>
-        lbl.id === labelId
-          ? {
-              ...lbl,
-              imageSuggestions: suggestions,       // guardo objetos
-              selectedImage: suggestions[0] || null,
-            }
-          : lbl
-      )
-    );
-  
-  } catch (e) {
-    console.error('Error fetching images:', e);
-    setLabels(prev =>
-      prev.map(lbl =>
-        lbl.id === labelId
-          ? { ...lbl, imageSuggestions: [], selectedImage: null }
-          : lbl
-      )
-    );
+  /**
+   * Guarda la configuración en localStorage y actualiza decks/modelos
+   */
+  const handleSaveSettings = () => {
+    saveConfigToStorage({ deck, model, ankiConnectUrl, selectedLanguage })
+    setSnackbar({ open: true, message: t("configurationSaved"), severity: "success" })
+    if (ankiConnectUrl) {
+      fetchDecksAndModels(ankiConnectUrl)
+    }
   }
-};
 
-  // Función para buscar la palabra en el backend (GET /search)
-  // Se mantiene igual ya que sigue llamando al backend para búsqueda en el diccionario
-  const handleSearch = async () => {
-    if (!searchWord.trim()) {
-      setSearchError(true);
-      return;
-    }
-    setSearchError(false);
-    setLoadingMessage('Buscando textos...');
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/search?word=${encodeURIComponent(searchWord)}`);
-      const data = await response.json();
-      if (data.error) {
-        setLoadingMessage('');
-        setSnackbar({ open: true, message: data.error, severity: 'error' });
-        return;
-      }
-      // Verifica duplicados (ignorando mayúsculas)
-      const exists = labels.some(
-        (label) => label.text.toLowerCase() === data.word.toLowerCase()
-      );
-      if (exists) {
-        setLoadingMessage('');
-        setSnackbar({ open: true, message: 'La palabra ya está en la cola.', severity: 'error' });
-        return;
-      }
-      // Crear la nueva etiqueta inicializada con propiedades de imagen vacías
-      const newLabel: Label = {
-        id: Date.now(),
-        text: data.word,
-        ipa: data.ipa,
-        meaning: data.meaning,
-        example: data.example,
-        isEditing: false,
-        imageSuggestions: [],
-        selectedImage: null,
-      };
-      // Agregar la etiqueta al estado
-      setLabels((prev) => [newLabel, ...prev]);
-      // Llamar a la función para buscar imágenes para esta etiqueta
-      fetchImageSuggestionsForLabel(newLabel.id, newLabel.text, newLabel.example, newLabel.meaning);
-      setLoadingMessage('');
-    } catch (error) {
-      console.error('Error al buscar la palabra:', error);
-      setLoadingMessage('');
-      const errMsg = error instanceof Error ? error.message : String(error);
-      setSnackbar({ open: true, message: `Error al buscar la palabra: ${errMsg}`, severity: 'error' });
-    }
-  };
-
-  // Función para aprobar la tarjeta y enviarla directamente a AnkiConnect (con audio)
+  /**
+   * Procesa y envía una tarjeta a Anki
+   * @param label - Etiqueta a procesar
+   */
   const handleApprove = async (label: Label) => {
-    setIsProcessing(true);
-    setProcessingLabelId(label.id);
-  
+    setIsProcessing(true)
+    setProcessingLabelId(label.id)
+
     try {
-      // 1) Si hay imagen seleccionada, la mandamos al backend para que la guarde
-      let filename: string | null = null;
+      const apiUrl = getApiUrl()
+
+      // Guardar imagen si está seleccionada
+      let filename: string | null = null
       if (label.selectedImage) {
-        const resp = await fetch(`${import.meta.env.VITE_API_URL}/save-image`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: label.selectedImage.fullURL })
-        });
-        const json = await resp.json();
-        if (json.error) throw new Error(json.error);
-        filename = json.filename;          
+        const resp = await fetch(`${apiUrl}/save-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: label.selectedImage.fullURL }),
+        })
+        const json = await resp.json()
+        if (json.error) throw new Error(json.error)
+        filename = json.filename
       }
-  
+
+      // Almacenar imagen en Anki si existe
       if (filename) {
         await fetch(ankiConnectUrl, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
-            'x-anki-url': ankiConnectUrl
+            "Content-Type": "application/json",
+            "x-anki-url": ankiConnectUrl,
           },
           body: JSON.stringify({
-            action: 'storeMediaFile',
+            action: "storeMediaFile",
             version: 6,
             params: {
               filename,
-              url: `${import.meta.env.VITE_API_URL}/media/${filename}`
-            }
-          })
-        });
+              url: `${apiUrl}/media/${filename}`,
+            },
+          }),
+        })
       }
-  
+
+      // Preparar campos de la nota
       const fields: any = {
         Word: label.text.toLowerCase(),
         IPA: label.ipa.trim(),
         Meaning: label.meaning.trim(),
         Example: label.example.trim(),
-        Image: filename ? `<img src="${filename}">` : ''    // siempre un string
-      };
+        Image: filename ? `<img src="${filename}">` : "",
+      }
 
+      // Preparar archivos de audio
       const audio = [
         {
           url: getTTSUrl(label.text, selectedLanguage),
           filename: `${label.text.toLowerCase()}_word.mp3`,
-          fields: ["Sound"]
+          fields: ["Sound"],
         },
         {
           url: getTTSUrl(label.meaning, selectedLanguage),
           filename: `${label.text.toLowerCase()}_meaning.mp3`,
-          fields: ["Sound_Meaning"]
+          fields: ["Sound_Meaning"],
         },
         {
           url: getTTSUrl(label.example, selectedLanguage),
           filename: `${label.text.toLowerCase()}_example.mp3`,
-          fields: ["Sound_Example"]
-        }
-      ];
+          fields: ["Sound_Example"],
+        },
+      ]
 
+      // Crear nota en Anki
       const note: any = {
         deckName: deck,
         modelName: model,
         fields,
         options: { allowDuplicate: false },
         audio,
-      };
-  
+      }
+
       const addResp = await fetch(ankiConnectUrl, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'x-anki-url': ankiConnectUrl
+          "Content-Type": "application/json",
+          "x-anki-url": ankiConnectUrl,
         },
         body: JSON.stringify({
-          action: 'addNote',
+          action: "addNote",
           version: 6,
-          params: { note }
-        })
-      });
-      const addJson = await addResp.json();
-      if (addJson.error) throw new Error(addJson.error);
-  
-      setSnackbar({ open: true, message: 'Tarjeta creada con éxito', severity: 'success' });
-      setLabels(prev => prev.filter(l => l.id !== label.id));
-  
-    } catch (err:any) {
-      console.error('Error al aprobar la tarjeta:', err);
-      setSnackbar({ open: true, message: `Error: ${err.message}`, severity: 'error' });
+          params: { note },
+        }),
+      })
+      const addJson = await addResp.json()
+      if (addJson.error) throw new Error(addJson.error)
+
+      setSnackbar({ open: true, message: t("cardCreatedSuccessfully"), severity: "success" })
+      setLabels((prev) => prev.filter((l) => l.id !== label.id))
+    } catch (err: any) {
+      console.error("Error al aprobar la tarjeta:", err)
+      setSnackbar({ open: true, message: `${t("error")}: ${err.message}`, severity: "error" })
     } finally {
-      setIsProcessing(false);
-      setProcessingLabelId(null);
+      setIsProcessing(false)
+      setProcessingLabelId(null)
     }
-  };
+  }
 
-  // Guarda la configuración en localStorage y recupera decks/modelos si la URL es válida
-  const handleSaveSettings = () => {
-    localStorage.setItem('deck', deck);
-    localStorage.setItem('model', model);
-    localStorage.setItem('ankiConnectUrl', ankiConnectUrl);
-    localStorage.setItem('selectedLanguage', selectedLanguage); // Guarda el idioma
-    setSnackbar({ open: true, message: 'Configuración guardada', severity: 'success' });
-    if (ankiConnectUrl) {
-      fetchDecksAndModels(ankiConnectUrl);
-    }
-  };
-
+  /**
+   * Alterna el modo de edición de una etiqueta
+   * @param id - ID de la etiqueta
+   */
   const toggleEditLabel = (id: number) => {
     setLabels((prev) =>
       prev.map((label) => {
         if (label.id === id) {
-          const newEditingState = !label.isEditing;
+          const newEditingState = !label.isEditing
+          // Si se termina de editar, buscar nuevas imágenes
           if (label.isEditing && !newEditingState) {
-            fetchImageSuggestionsForLabel(label.id, label.text, label.example, label.meaning);
+            fetchImageSuggestionsForLabel(label.id, label.text, label.example, label.meaning, "en", 1, setLabels)
           }
-          return { ...label, isEditing: newEditingState };
+          return { ...label, isEditing: newEditingState }
         }
-        return label;
-      })
-    );
-  };
+        return label
+      }),
+    )
+  }
 
-  const updateLabelField = (
-    id: number,
-    field: keyof Omit<Label, 'id' | 'text' | 'isEditing'>,
-    value: string
-  ) => {
-    setLabels((prev) =>
-      prev.map((label) =>
-        label.id === id ? { ...label, [field]: value } : label
-      )
-    );
-  };
+  /**
+   * Actualiza un campo específico de una etiqueta
+   * @param id - ID de la etiqueta
+   * @param field - Campo a actualizar
+   * @param value - Nuevo valor
+   */
+  const updateLabelField = (id: number, field: keyof Omit<Label, "id" | "text" | "isEditing">, value: string) => {
+    setLabels((prev) => prev.map((label) => (label.id === id ? { ...label, [field]: value } : label)))
+  }
+
+  /**
+   * Elimina una etiqueta de la cola
+   * @param labelId - ID de la etiqueta a eliminar
+   */
+  const handleRejectLabel = (labelId: number) => {
+    setLabels((prev) => prev.filter((l) => l.id !== labelId))
+  }
+
+  /**
+   * Maneja la selección de una imagen en el modal
+   * @param image - Imagen seleccionada
+   */
+  const handleImageSelect = (image: ImageSuggestion) => {
+    if (openImageModalLabelId) {
+      setLabels((prev) => prev.map((l) => (l.id === openImageModalLabelId ? { ...l, selectedImage: image } : l)))
+      setOpenImageModalLabelId(null)
+    }
+  }
+
+  // Buscar etiqueta actual para el modal de imágenes
+  const currentLabel = labels.find((l) => l.id === openImageModalLabelId) || null
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {/* Botón de ayuda fijo */}
-    <HelpGuide />
+
+      {/* Componente de ayuda fijo */}
+      <HelpGuide selectedLanguage={selectedLanguage} />
+
       <Box
         sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          width: '100%',
+          display: "flex",
+          justifyContent: "center",
+          width: "100%",
           minHeight: 451,
-          transition: 'all 0.5s ease-in-out',
+          transition: "all 0.5s ease-in-out",
           flexDirection: {
-            xs: 'column',
-            sm: 'row',
+            xs: "column",
+            sm: "row",
           },
           padding: {
             xs: 2,
@@ -443,24 +292,24 @@ function App() {
         <Container
           maxWidth="md"
           sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'stretch',
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "stretch",
             padding: {
               xs: 2,
               sm: 3,
             },
-            boxSizing: 'border-box',
-            margin: '0 auto',
-            width: "100%"
+            boxSizing: "border-box",
+            margin: "0 auto",
+            width: "100%",
           }}
         >
           {/* Botón para alternar modo oscuro */}
           <IconButton
             onClick={() => setDarkMode(!darkMode)}
             sx={{
-              position: 'fixed',
+              position: "fixed",
               bottom: 16,
               right: 16,
               zIndex: 1300,
@@ -472,443 +321,60 @@ function App() {
           </IconButton>
 
           <Typography variant="h2" gutterBottom>
-            Anki Card Generator
+            {t("appTitle")}
           </Typography>
 
           {/* Sección de configuración */}
-          <Box sx={{ mb: 4, width:"100%" }}>
-            <Typography variant="h5" gutterBottom>
-              Configuración
-            </Typography>
-            <Box
-              sx={{
-                display: 'grid',
-                gap: 2,
-                gridTemplateColumns: {
-                  xs: '1fr',
-                  sm: '1fr 1fr',
-                  md: 'repeat(3, 1fr)',
-                },
-              }}
-            >
-              {/* Campo Deck */}
-              <Box>
-                <Autocomplete
-                  options={availableDecks}
-                  value={deck}
-                  onChange={(_, newValue) => {
-                    if (newValue) setDeck(newValue);
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Deck"
-                      variant="standard"
-                      helperText={
-                        (!ankiConnectUrl || ankiConnectError)
-                          ? ankiConnectError || 'Configura la URL de Anki Connect primero'
-                          : ''
-                      }
-                    />
-                  )}
-                  disabled={!ankiConnectUrl || isFetchingOptions || Boolean(ankiConnectError)}
-                  fullWidth
-                />
-              </Box>
-              {/* Campo Model */}
-              <Box>
-                <Autocomplete
-                  options={availableModels}
-                  value={model}
-                  onChange={(_, newValue) => {
-                    if (newValue) setModel(newValue);
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Model"
-                      variant="standard"
-                      helperText={
-                        (!ankiConnectUrl || ankiConnectError)
-                          ? ankiConnectError || 'Configura la URL de Anki Connect primero'
-                          : ''
-                      }
-                    />
-                  )}
-                  disabled={!ankiConnectUrl || isFetchingOptions || Boolean(ankiConnectError)}
-                  fullWidth
-                />
-              </Box>
-              {/* Campo Idioma */}
-              <Box>
-                <FormControl fullWidth variant="standard">
-                  <InputLabel id="language-select-label">Idioma</InputLabel>
-                  <Select
-                    labelId="language-select-label"
-                    id="language-select"
-                    value={selectedLanguage}
-                    onChange={(e) => setSelectedLanguage(e.target.value)}
-                    label="Idioma"
-                  >
-                    <MenuItem value="en">Inglés</MenuItem>
-                    <MenuItem value="es">Español</MenuItem>
-                    <MenuItem value="de">Alemán</MenuItem>
-                    <MenuItem value="ja">Japonés</MenuItem>
-                    <MenuItem value="zh">Chino</MenuItem>
-                    {/* Agrega más idiomas si lo deseas */}
-                  </Select>
-                </FormControl>
-              </Box>
-              {/* Segunda fila: Campo Anki Connect URL */}
-              <Box sx={{ gridColumn: { xs: '1fr', sm: 'span 2', md: 'span 2' } }}>
-                <TextField
-                  label="Anki Connect URL"
-                  variant="standard"
-                  value={ankiConnectUrl}
-                  onChange={(e) => setAnkiConnectUrl(e.target.value)}
-                  fullWidth
-                />
-              </Box>
-              {/* Segunda fila: Botón Save Settings */}
-              <Box
-                sx={{
-                  gridColumn: { xs: '1fr', sm: 'span 2', md: 'span 1' },
-                  display: 'flex',
-                  alignItems: 'center',
-                }}
-              >
-                <Button
-                  variant="contained"
-                  fullWidth
-                  startIcon={<SettingsIcon />}
-                  onClick={handleSaveSettings}
-                  sx={{
-                    height: '100%',
-                    paddingY: 1.5,
-                    paddingX: 2,
-                  }}
-                >
-                  {isFetchingOptions ? <CircularProgress size={20} /> : 'Save Settings'}
-                </Button>
-              </Box>
-            </Box>  
-          </Box>
+          <ConfigurationSection
+            deck={deck}
+            setDeck={setDeck}
+            model={model}
+            setModel={setModel}
+            ankiConnectUrl={ankiConnectUrl}
+            setAnkiConnectUrl={setAnkiConnectUrl}
+            selectedLanguage={selectedLanguage}
+            setSelectedLanguage={setSelectedLanguage}
+            availableDecks={availableDecks}
+            availableModels={availableModels}
+            isFetchingOptions={isFetchingOptions}
+            ankiConnectError={ankiConnectError}
+            onSaveSettings={handleSaveSettings}
+          />
 
           {/* Sección de búsqueda */}
-          <Box sx={{ mb: 4 }}>
-            <Typography variant="h5" gutterBottom>
-              Buscar Palabra
-            </Typography>
-            <Stack direction="row" spacing={2} alignItems="center">
-              <TextField
-                label="Palabra"
-                variant="standard"
-                value={searchWord}
-                onChange={handleSearchChange}
-                error={searchError}
-                helperText={searchError ? 'Debe introducir una palabra' : ''}
-                fullWidth
-              />
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<SearchIcon />}
-                onClick={handleSearch}
-                sx={{
-                  height: '100%',
-                  minWidth: {
-                    xs: '120px',
-                    sm: '150px',
-                    md: 'auto',
-                  },
-                  paddingX: 2,
-                }}
-              >
-                Search
-              </Button>
-            </Stack>
-          </Box>
+          <SearchSection
+            searchWord={searchWord}
+            searchError={searchError}
+            selectedLanguage={selectedLanguage}
+            onSearchChange={handleSearchChange}
+            onSearch={() => handleSearch(labels, setLabels, setSnackbar, fetchImageSuggestionsForLabel)}
+          />
 
-          {/* Sección de Labels */}
-          <Box sx={{ flexGrow: 1 }}>
-            <Typography variant="h5" gutterBottom>
-              Queue de Labels
-            </Typography>
-
-            {loadingMessage && (
-              <Typography variant="body2" sx={{ color: 'gray', mb: 2 }}>
-                {loadingMessage}
-              </Typography>
-            )}
-
-            {labels.map((label) => (
-              <Box
-                key={label.id}
-                sx={{
-                  mt: 2,
-                  backgroundColor: (theme) =>
-                    theme.palette.mode === 'dark' ? '#424242' : '#f0f0f0',
-                  color: (theme) => (theme.palette.mode === 'dark' ? '#fff' : '#333'),
-                  padding: { xs: 1, sm: 2 },
-                  borderRadius: 4,
-                  boxShadow: '-3px 5px 12px rgba(0, 0, 0, 0.5)',
-                  width: { xs: '100%', sm: '95%' },
-                  overflowWrap: 'break-word',
-                  whiteSpace: 'normal',
-                  transition: 'all 0.3s ease-in-out',
-                }}
-              >
-                <Typography variant="h6">
-                  <b>Word:</b> {label.text}
-                </Typography>
-
-                {label.isEditing ? (
-                  <Stack spacing={2} sx={{ mt: 1, flexWrap: 'wrap' }}>
-                    <TextField
-                      label="IPA"
-                      variant="outlined"
-                      value={label.ipa}
-                      onChange={(e) =>
-                        updateLabelField(label.id, 'ipa', e.target.value)
-                      }
-                      fullWidth
-                    />
-                    <TextField
-                      label="Meaning"
-                      variant="outlined"
-                      value={label.meaning}
-                      onChange={(e) =>
-                        updateLabelField(label.id, 'meaning', e.target.value)
-                      }
-                      fullWidth
-                    />
-                    <TextField
-                      label="Example"
-                      variant="outlined"
-                      value={label.example}
-                      onChange={(e) =>
-                        updateLabelField(label.id, 'example', e.target.value)
-                      }
-                      fullWidth
-                    />
-                  </Stack>
-                ) : (
-                  <>
-                    <Typography>
-                      <b>IPA:</b> {label.ipa}
-                    </Typography>
-                    <Typography>
-                      <b>Meaning:</b> {label.meaning}
-                    </Typography>
-                    <Typography>
-                      <b>Example:</b> {label.example}
-                    </Typography>
-                  </>
-                )}
-
-                {/* Vista previa de la imagen para esta etiqueta */}
-                <Box
-                  onClick={() => setOpenImageModalLabelId(label.id)}
-                  sx={{ cursor: 'pointer', mt: 1 }}
-                >
-                  {label.selectedImage ? (
-                    <img
-                      src={label.selectedImage.previewURL}
-                      alt={label.text}
-                      style={{ maxWidth: '100%', borderRadius: '4px' }}
-                    />
-                  ) : (
-                    <Typography variant="body2" color="textSecondary">
-                      No se encontraron imágenes. (Click para intentar)
-                    </Typography>
-                  )}
-                </Box>
-
-                <Stack
-                  direction={{ xs: 'column', sm: 'row' }}
-                  spacing={2}
-                  sx={{ mt: 2, flexWrap: 'wrap' }}
-                >
-                  <Button
-                    variant="contained"
-                    color="success"
-                    disabled={isProcessing || label.isEditing}
-                    sx={{
-                      transition: 'all 0.3s ease-in-out',
-                      color: (theme) =>
-                        theme.palette.mode === 'dark' ? '#333' : '#fff',
-                    }}
-                    onClick={() => handleApprove(label)}
-                  >
-                    {processingLabelId === label.id ? 'Procesando...' : 'Aprobar'}
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="error"
-                    sx={{
-                      transition: 'all 0.3s ease-in-out',
-                      color: (theme) =>
-                        theme.palette.mode === 'dark' ? '#333' : '#fff',
-                    }}
-                    disabled={label.isEditing}
-                    onClick={() =>
-                      setLabels((prev) => prev.filter((l) => l.id !== label.id))
-                    }
-                  >
-                    Rechazar
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color={label.isEditing ? 'primary' : 'warning'}
-                    sx={{
-                      transition: 'all 0.3s ease-in-out',
-                      color: (theme) =>
-                        theme.palette.mode === 'dark' ? '#333' : '#fff',
-                    }}
-                    onClick={() => toggleEditLabel(label.id)}
-                  >
-                    {label.isEditing ? 'Hecho' : 'Editar'}
-                  </Button>
-                </Stack>
-              </Box>
-            ))}
-          </Box>
-
-        {/* Modal para selección de imágenes para la etiqueta actual */}
-        {openImageModalLabelId && (() => {
-          const currentLabel = labels.find((l) => l.id === openImageModalLabelId);
-          if (!currentLabel) return null;
-          return (
-            <Box
-              sx={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                backgroundColor: 'rgba(0,0,0,0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 1500,
-              }}
-              onClick={() => setOpenImageModalLabelId(null)} 
-            >
-              <Box
-                sx={(theme) => ({
-                  backgroundColor: theme.palette.mode === 'dark' ? '#424242' : 'white',
-                  padding: 2,
-                  borderRadius: 2,
-                  width: '90%',
-                  maxWidth: 600,
-                })}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Box
-                  sx={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    mb: 1,
-                  }}
-                >
-                  <Typography variant="h6" gutterBottom>
-                    Selecciona una imagen para "{currentLabel.text}"
-                  </Typography>
-                </Box>
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 2,
-                  }}
-                >
-                  {currentLabel.imageSuggestions && currentLabel.imageSuggestions.length > 0 ? (
-                    currentLabel.imageSuggestions.map((img, index) => (
-                      <Box
-                        key={index}
-                        sx={{ cursor: 'pointer' }}
-                        onClick={() => {
-                          setLabels(prev =>
-                            prev.map(l =>
-                              l.id === currentLabel.id
-                                // guardamos el objeto completo img
-                                ? { ...l, selectedImage: img }
-                                : l
-                            )
-                          );
-                          setOpenImageModalLabelId(null);
-                        }}
-                      >
-                        <img
-                        // mostramos previewURL
-                        src={img.previewURL}
-                        alt={`suggestion-${index}`}
-                        style={{
-                          width: '100%',
-                          borderRadius: '4px',
-                          // destacamos la seleccion
-                          border:
-                            currentLabel.selectedImage?.previewURL === img.previewURL
-                              ? '2px solid blue'
-                              : 'none',
-                        }}
-                      />
-                      </Box>
-                    ))
-                  ) : (
-                    <Typography variant="body2">
-                      No se encontraron imágenes.
-                    </Typography>
-                  )}
-                  {/* Opción para subir imagen personalizada */}
-                  <Box
-                    sx={{
-                      cursor: 'pointer',
-                      border: '2px dashed gray',
-                      borderRadius: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      height: 100,
-                    }}
-                  >
-                    <label style={{ cursor: 'pointer', textAlign: 'center' }}>
-                      Subir imagen
-                      <input
-                        type="file"
-                        accept="image/*"
-                        style={{ display: 'none' }}
-                        onChange={e => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = event => {
-                              // aquí guardamos un objeto con datos base64 en previewURL y fullURL
-                              const dataUrl = event.target?.result as string;
-                              const obj = { previewURL: dataUrl, fullURL: dataUrl };
-                              setLabels(prev =>
-                                prev.map(l =>
-                                  l.id === currentLabel.id
-                                    ? { ...l, selectedImage: obj }
-                                    : l
-                                )
-                              );
-                              setOpenImageModalLabelId(null);
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        }}
-                      />
-                    </label>
-                  </Box>
-                </Box>
-              </Box>
-            </Box>
-          );
-        })()}
+          {/* Sección de etiquetas */}
+          <LabelsSection
+            labels={labels}
+            isProcessing={isProcessing}
+            processingLabelId={processingLabelId}
+            loadingMessage={loadingMessage}
+            selectedLanguage={selectedLanguage}
+            onApprove={handleApprove}
+            onReject={handleRejectLabel}
+            onEdit={toggleEditLabel}
+            onFieldUpdate={updateLabelField}
+            onImageClick={setOpenImageModalLabelId}
+          />
         </Container>
 
+        {/* Modal de selección de imágenes */}
+        <ImageModal
+          isOpen={!!openImageModalLabelId}
+          currentLabel={currentLabel}
+          selectedLanguage={selectedLanguage}
+          onClose={() => setOpenImageModalLabelId(null)}
+          onImageSelect={handleImageSelect}
+        />
+
+        {/* Snackbar para notificaciones */}
         <Snackbar
           open={snackbar.open}
           autoHideDuration={6000}
@@ -916,15 +382,15 @@ function App() {
         >
           <Alert
             onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-            severity={snackbar.severity as 'success' | 'error'}
-            sx={{ width: '100%' }}
+            severity={snackbar.severity}
+            sx={{ width: "100%" }}
           >
             {snackbar.message}
           </Alert>
         </Snackbar>
       </Box>
     </ThemeProvider>
-  );
+  )
 }
 
-export default App;
+export default App

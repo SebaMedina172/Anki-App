@@ -1,56 +1,60 @@
-import React, { useState } from 'react';
-import ReactDOM from 'react-dom';
-import { useTheme } from '@mui/material/styles';
-import {
-  DialogContent,
-  Typography,
-  Button
-} from '@mui/material';
+"use client"
 
-export function Modal({ children, isOpen, onClose }: {
-  children: React.ReactNode;
-  isOpen: boolean;
-  onClose: () => void;
+import type React from "react"
+import { useState } from "react"
+import ReactDOM from "react-dom"
+import { useTheme } from "@mui/material/styles"
+import { DialogContent, Typography, Button } from "@mui/material"
+import { useTranslation } from "../hooks/useTranslation"
+
+export function Modal({
+  children,
+  isOpen,
+  onClose,
+}: {
+  children: React.ReactNode
+  isOpen: boolean
+  onClose: () => void
 }) {
-  const theme = useTheme();
-  if (!isOpen) return null;
+  const theme = useTheme()
+  if (!isOpen) return null
 
   const overlayStyle: React.CSSProperties = {
-    position: 'fixed',
+    position: "fixed",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     zIndex: 1300,
-  };
+  }
 
   const modalStyle: React.CSSProperties = {
     background: theme.palette.background.paper,
     color: theme.palette.text.primary,
     borderRadius: 8,
-    width: '80%',        
-    maxWidth: 800,       
-    maxHeight: '80vh',   
-    overflowY: 'auto',   
+    width: "80%",
+    maxWidth: 800,
+    maxHeight: "80vh",
+    overflowY: "auto",
     padding: 24,
-    position: 'relative',
+    position: "relative",
     boxShadow: theme.shadows[5],
-  };
+  }
 
   const closeBtnStyle: React.CSSProperties = {
-    position: 'absolute',
+    position: "absolute",
     top: 8,
     right: 8,
-    background: 'transparent',
-    border: 'none',
+    background: "transparent",
+    border: "none",
     fontSize: 24,
-    cursor: 'pointer',
+    cursor: "pointer",
     color: theme.palette.text.primary,
-  };
+  }
 
   return ReactDOM.createPortal(
     <div style={overlayStyle} onClick={onClose}>
@@ -61,146 +65,147 @@ export function Modal({ children, isOpen, onClose }: {
         <div style={{ marginTop: 16 }}>{children}</div>
       </div>
     </div>,
-    document.body
-  );
+    document.body,
+  )
 }
 
-export default function HelpGuide() {
-  const theme = useTheme();
-  const [isOpen, setIsOpen] = useState(false);
-  const toggle = () => setIsOpen((o) => !o);
+interface HelpGuideProps {
+  selectedLanguage?: string
+}
+
+export default function HelpGuide({ selectedLanguage = "en" }: HelpGuideProps) {
+  const theme = useTheme()
+  const [isOpen, setIsOpen] = useState(false)
+  const { t } = useTranslation(selectedLanguage)
+  const toggle = () => setIsOpen((o) => !o)
 
   const helpBtnStyle: React.CSSProperties = {
-    position: 'fixed',
+    position: "fixed",
     top: 16,
     right: 16,
     zIndex: 1200,
-    background: theme.palette.mode === 'dark' ? theme.palette.grey[900] : theme.palette.grey[100],
+    background: theme.palette.mode === "dark" ? theme.palette.grey[900] : theme.palette.grey[100],
     color: theme.palette.text.primary,
     border: `1px solid ${theme.palette.divider}`,
-    borderRadius: '50%',
+    borderRadius: "50%",
     width: 40,
     height: 40,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     fontSize: 20,
-    cursor: 'pointer',
+    cursor: "pointer",
     boxShadow: theme.shadows[2],
-  };
+  }
 
   return (
     <>
-      <button
-        onClick={toggle}
-        aria-label="Ayuda"
-        style={helpBtnStyle}
-      >
+      <button onClick={toggle} aria-label="Ayuda" style={helpBtnStyle}>
         ❔
       </button>
 
       <Modal isOpen={isOpen} onClose={toggle}>
-        <h2>Cómo usar la app</h2>
+        <h2>{t("helpGuide.title")}</h2>
         <DialogContent dividers>
           {/* Sección 1: Instalar y preparar AnkiConnect */}
           <Typography variant="h6" gutterBottom>
-            <b>1. Instalar y preparar AnkiConnect</b>
+            <b>{t("helpGuide.installAnkiConnect")}</b>
           </Typography>
           <Typography variant="body2">
-            • Descarga e instala Anki desde{" "}
+            {t("helpGuide.downloadAnki")}{" "}
             <a href="https://apps.ankiweb.net" target="_blank" rel="noopener noreferrer">
               apps.ankiweb.net
-            </a>.
+            </a>
+            .
           </Typography>
           <Typography variant="body2">
-            • Instala AnkiConnect:
+            {t("helpGuide.installAnkiConnectSteps")}
             <br />
-            &nbsp;&nbsp;– Abre <b>Anki → Herramientas → Complementos → Obtener complementos…</b>
+            &nbsp;&nbsp;– {t("helpGuide.openAnkiTools")}
             <br />
-            &nbsp;&nbsp;– Pega el código <b>2055492159</b> y pulsa Instalar.
+            &nbsp;&nbsp;– {t("helpGuide.pasteCode")}
           </Typography>
           <Typography variant="body2">
-            • Configura CORS en AnkiConnect:
+            {t("helpGuide.configureCors")}
             <br />
-            &nbsp;&nbsp;– Dirigete nuevamente a <b>Anki → Herramientas → Complementos</b>.
+            &nbsp;&nbsp;– {t("helpGuide.goToAnkiTools")}
             <br />
-            &nbsp;&nbsp;– Selecciona <b>AnkiConnect</b> y haz click en <b>Configuracion</b>
+            &nbsp;&nbsp;– {t("helpGuide.selectAnkiConnect")}
             <br />
-            &nbsp;&nbsp;– Sustituye la sección <code>webCorsOriginList</code> por:
-            <pre style={{
-              background: theme.palette.background.paper,   // mismo papel que el modal
-              color: theme.palette.text.primary,             // texto legible en ambos modos
-              padding: '8px',
-              borderRadius: '4px',
-              border: `1px solid ${theme.palette.divider}`,  // un sutil borde
-              overflowX: 'auto'                              // scroll horizontal si hace falta
-            }}>
-        {`"webCorsOriginList": [
+            &nbsp;&nbsp;– {t("helpGuide.replaceWebCors")}
+            <pre
+              style={{
+                background: theme.palette.background.paper,
+                color: theme.palette.text.primary,
+                padding: "8px",
+                borderRadius: "4px",
+                border: `1px solid ${theme.palette.divider}`,
+                overflowX: "auto",
+              }}
+            >
+              {`"webCorsOriginList": [
           "https://anki-app.netlify.app",
           "http://localhost"
         ]`}
             </pre>
-            &nbsp;&nbsp;– Guarda y reinicia Anki.
+            &nbsp;&nbsp;– {t("helpGuide.saveAndRestart")}
           </Typography>
 
           {/* Sección 2: Note Type recomendado */}
-            <Typography variant="h6" gutterBottom>
-              <b>2. Note Type (Modelo) recomendado</b>
-            </Typography>
-            <Typography variant="body2">
-              Para que la app vincule correctamente todos los datos (palabra, audio, IPA, significado,
-              ejemplo, TTS y foto), tu modelo de Anki debe incluir exactamente estos campos:
-            </Typography>
-            <ul>
-              {['Word', 'Sound', 'IPA', 'Meaning', 'Example', 'Sound_Meaning', 'Sound_Example', 'Image']
-                .map((field) => (
-                  <li key={field}>
-                    <Typography variant="body2">{field}</Typography>
-                  </li>
-                ))}
-            </ul>
+          <Typography variant="h6" gutterBottom>
+            <b>{t("helpGuide.recommendedNoteType")}</b>
+          </Typography>
+          <Typography variant="body2">{t("helpGuide.linkAllData")}</Typography>
+          <ul>
+            {["Word", "Sound", "IPA", "Meaning", "Example", "Sound_Meaning", "Sound_Example", "Image"].map((field) => (
+              <li key={field}>
+                <Typography variant="body2">{field}</Typography>
+              </li>
+            ))}
+          </ul>
 
-            {/* A) Usar modelo pre-configurado */}
-            <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-              <b>A) Usar mi modelo pre-configurado</b>
-            </Typography>
-            <Typography variant="body2">
-              Descarga e importa el paquete de modelo listo para usar en Anki:
-            </Typography>
-            <Button
-                variant="outlined"
-                component="a"
-                href="/client/public/Export-Model.apkg"
-                download="AnkiCustomModel.apkg"
+          {/* A) Usar modelo pre-configurado */}
+          <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
+            <b>{t("helpGuide.usePreConfigured")}</b>
+          </Typography>
+          <Typography variant="body2">{t("helpGuide.downloadImportPackage")}</Typography>
+          <Button
+            variant="outlined"
+            component="a"
+            href="/client/public/Export-Model.apkg"
+            download="AnkiCustomModel.apkg"
+          >
+            {t("helpGuide.downloadModel")}
+          </Button>
+
+          {/* B) Crear tu propio modelo */}
+          <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
+            <b>{t("helpGuide.createYourOwn")}</b>
+          </Typography>
+          <Typography variant="body2" component="div">
+            <ol>
+              <li>{t("helpGuide.createOwnSteps")}</li>
+              <li>{t("helpGuide.addFieldsTab")}</li>
+              <ul>
+                {["Word", "Sound", "IPA", "Meaning", "Example", "Sound_Meaning", "Sound_Example", "Image"].map(
+                  (field) => (
+                    <li key={field}>
+                      <Typography variant="body2">{field}</Typography>
+                    </li>
+                  ),
+                )}
+              </ul>
+              <li>{t("helpGuide.insertTemplates")}</li>
+              <pre
+                style={{
+                  background: theme.palette.background.paper,
+                  color: theme.palette.text.primary,
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: `1px solid ${theme.palette.divider}`,
+                  overflowX: "auto",
+                }}
               >
-              Descargar modelo (.apkg)
-            </Button>
-
-            {/* B) Crear tu propio modelo */}
-            <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-              <b>B) Crear tu propio modelo</b>
-            </Typography>
-            <Typography variant="body2" component="div">
-              <ol>
-                <li>En Anki, ve a <b>Herramientas → Gestionar modelos → Añadir</b> y crea o duplica un modelo.</li>
-                <li>En la pestaña <b>Campos</b>, añade estos campos EXACTAMENTE con estos nombres:</li>
-                <ul>
-                  {['Word', 'Sound', 'IPA', 'Meaning', 'Example', 'Sound_Meaning', 'Sound_Example', 'Image']
-                    .map((field) => (
-                      <li key={field}>
-                        <Typography variant="body2">{field}</Typography>
-                      </li>
-                    ))}
-                </ul>
-                <li>En <b>Plantillas</b>, inserta los campos donde quieras:</li>
-                <pre style={{
-                  background: theme.palette.background.paper,   // mismo papel que el modal
-                  color: theme.palette.text.primary,             // texto legible en ambos modos
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: `1px solid ${theme.palette.divider}`,  // un sutil borde
-                  overflowX: 'auto'                              // scroll horizontal si hace falta
-                }}>
                 {`                <div>
                   {{Word}} {{Sound}}
                   <div>{{IPA}}</div>
@@ -208,34 +213,33 @@ export default function HelpGuide() {
                   <div>{{Example} {{Sound_Example}}}</div>
                   <img src="{{Image}}" alt="Imagen"/>
                 </div>`}
-                      </pre>
-                <li>Guarda el modelo. Luego aparecerá en la lista de “Model” dentro de la app.</li>
-              </ol>
-            </Typography>
+              </pre>
+              <li>{t("helpGuide.saveModel")}</li>
+            </ol>
+          </Typography>
 
           {/* Sección 3: Configurar tu instancia de la web app */}
           <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>
-            <b>3. Configurar la web app</b>
+            <b>{t("helpGuide.configureWebApp")}</b>
           </Typography>
 
           <Typography variant="body2">
-            • En “Configuración”:
+            {t("helpGuide.inConfiguration")}
             <br />
-            &nbsp;&nbsp;– <b>Deck:</b> selecciona tu mazo destino.
+            &nbsp;&nbsp;– {t("helpGuide.selectDeck")}
             <br />
-            &nbsp;&nbsp;– <b>Model:</b> elige el modelo de nota.
+            &nbsp;&nbsp;– {t("helpGuide.chooseModel")}
             <br />
-            &nbsp;&nbsp;– <b>Anki Connect URL:</b> introduce tu URL del complemento. Por defecto es: <b>http://localhost:8765</b>
+            &nbsp;&nbsp;– {t("helpGuide.enterUrl")}
             <br />
-            &nbsp;&nbsp;– Haz clic en <b>Save Settings</b> para guardar la configuracion.
+            &nbsp;&nbsp;– {t("helpGuide.clickSave")}
           </Typography>
           <br />
           <Typography variant="caption" display="block" color="textSecondary">
-            Si al guardar ves errores, confirma que AnkiConnect esté abierto y la URL coincida
-            con tu configuración de CORS.
+            {t("helpGuide.confirmErrors")}
           </Typography>
         </DialogContent>
       </Modal>
     </>
-  );
+  )
 }
