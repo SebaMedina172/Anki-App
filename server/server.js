@@ -61,7 +61,7 @@ const app = express();
 
 // CORS configuration: allow frontend origin
 const corsOptions = {
-  origin: '*', // change to '*' if needed for testing
+  origin: 'https://anki-app-sm.vercel.app/', // change to '*' if needed for testing
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-anki-url']
 };
@@ -948,23 +948,54 @@ async function getExampleFromRAE(word) {
   try {
     console.log(`Intentando RAE para: ${word}`);
     
+    // Delay para evitar rate limiting
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
+    
     const url = `https://dle.rae.es/${encodeURIComponent(word)}`;
     
     const response = await axios.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+        'DNT': '1',
+        'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"'
       },
-      timeout: 10000
+      timeout: 15000,
+      maxRedirects: 5,
+      validateStatus: function (status) {
+        return status < 500; // Acepta códigos de estado menores a 500
+      }
     });
+    
+    // Si obtenemos 403, intentar con un approach diferente
+    if (response.status === 403) {
+      console.log("403 detectado, intentando método alternativo");
+      return await getExampleFromRAEAlternative(word);
+    }
     
     const $ = cheerio.load(response.data);
     
-    // Buscar ejemplos en la RAE
+    // Buscar ejemplos en la RAE con selectores más específicos
     const exampleSelectors = [
       '.ejemplo',
       '.ej',
       'span[title="ejemplo"]',
-      '.ejemplo-texto'
+      '.ejemplo-texto',
+      '.u.ejemplo',
+      'em.u',
+      '.articulo .ejemplo',
+      'p .ejemplo'
     ];
     
     for (const selector of exampleSelectors) {
@@ -976,7 +1007,9 @@ async function getExampleFromRAE(word) {
         if (example && 
             example.toLowerCase().includes(word.toLowerCase()) && 
             example.split(' ').length >= 4 && 
-            example.split(' ').length <= 20) {
+            example.split(' ').length <= 20 &&
+            !example.includes('Ver definición') &&
+            !example.includes('Diccionario')) {
           // Limpiar comillas y caracteres extraños
           const cleanExample = example.replace(/[""'']/g, '"').trim();
           return cleanExample;
@@ -986,6 +1019,58 @@ async function getExampleFromRAE(word) {
     
   } catch (error) {
     console.log("Error en RAE:", error.message);
+    
+    // Si hay error de conexión o timeout, intentar método alternativo
+    if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      return await getExampleFromRAEAlternative(word);
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Método alternativo para RAE cuando el principal falla
+ */
+async function getExampleFromRAEAlternative(word) {
+  try {
+    console.log(`Intentando RAE método alternativo para: ${word}`);
+    
+    // Delay más largo
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Intentar con la URL de búsqueda en lugar de directa
+    const searchUrl = `https://dle.rae.es/srv/search?m=30&w=${encodeURIComponent(word)}`;
+    
+    const response = await axios.get(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'es-es',
+        'Referer': 'https://dle.rae.es/',
+        'Connection': 'keep-alive'
+      },
+      timeout: 20000
+    });
+    
+    const $ = cheerio.load(response.data);
+    
+    // Buscar en los resultados de búsqueda
+    const examples = $('.resultado .ejemplo, .resultado em.u');
+    
+    for (let i = 0; i < examples.length; i++) {
+      const example = examples.eq(i).text().trim();
+      
+      if (example && 
+          example.toLowerCase().includes(word.toLowerCase()) && 
+          example.split(' ').length >= 4 && 
+          example.split(' ').length <= 20) {
+        return example.replace(/[""'']/g, '"').trim();
+      }
+    }
+    
+  } catch (error) {
+    console.log("Error en RAE alternativo:", error.message);
   }
   
   return null;
