@@ -1,0 +1,37 @@
+name: Server Health Check
+
+on:
+  schedule:
+    # Ejecutar cada 10 minutos para mantener el servidor activo
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping server health endpoint
+        run: |
+          RENDER_SERVER_URL="${{ secrets.RENDER_SERVER_URL }}"
+          
+          if [ -z "$RENDER_SERVER_URL" ]; then
+            echo "Error: RENDER_SERVER_URL no está configurada"
+            exit 1
+          fi
+          
+          echo "Haciendo health check a: $RENDER_SERVER_URL/ping"
+          
+          response=$(curl -s -w "\n%{http_code}" "$RENDER_SERVER_URL/ping")
+          http_code=$(echo "$response" | tail -n 1)
+          body=$(echo "$response" | head -n -1)
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -eq 200 ]; then
+            echo "✓ Servidor activo"
+            exit 0
+          else
+            echo "✗ Error: Servidor respondió con código $http_code"
+            exit 1
+          fi
