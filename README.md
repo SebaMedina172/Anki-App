@@ -17,7 +17,7 @@ Automatiza la creación de tarjetas de Anki con definiciones, pronunciación (IP
 
 ## 🚀 Demo en vivo
 
-https://anki-app.netlify.app
+https://anki-app-sm.vercel.app/
 
 ---
 
